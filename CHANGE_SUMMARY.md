@@ -42,7 +42,10 @@ In [`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json) setzt de
 Post-Create-Schritt keine persönliche Theme-Konfiguration mehr. Das neue
 getrackte Skript [`.devcontainer/post-create.sh`](.devcontainer/post-create.sh)
 verwendet standardmäßig die öffentlichen npm- und PyPI-Registries, installiert die
-festgelegte uv-Version `0.9.17` und führt `uv sync` aus.
+Python-Abhängigkeiten mit der festgelegten uv-Version `0.9.17` und führt `uv sync` aus.
+Das uv-Binary wird dafür bereits beim Image-Build aus dem offiziellen, versionierten
+Astral-GHCR-Image kopiert. Dadurch muss ein eingeschränkter PyPI-Mirror uv nicht selbst
+bereitstellen.
 
 Die bisherige Theme-Auswahl bleibt bei Bedarf als lokale Workspace-Einstellung unter
 dem Git-ignorierten `.vscode/`-Verzeichnis erhalten und ist kein Bestandteil der
@@ -53,6 +56,12 @@ Für Unternehmensumgebungen enthält
 Registry-Platzhalter. Die daraus lokal erzeugte `.devcontainer/local.env` wird von Git
 ignoriert. So bleiben konkrete Proxy-URLs und optionale Zugangsdaten lokal erhalten,
 ohne in die Kundenvorlage zu gelangen.
+
+Der optionale, im Lab nicht verwendete `pnpm`-Download des Node-Features ist
+deaktiviert. Damit greift der Image-Build nicht mehr auf die öffentliche npm-Registry
+zu, bevor `.devcontainer/local.env` verfügbar ist. Die Vorlage und Challenge 1
+unterscheiden nun außerdem zwischen Docker-/Feature-Build, Paket-Registry-Mirror und
+HTTP(S)-Forward-Proxy und enthalten konkrete Rebuild- und Diagnosehinweise.
 
 Die neue Datei [`.devcontainer/devcontainer-lock.json`](.devcontainer/devcontainer-lock.json)
 fixiert Versionen, Digests und Integritätswerte der Dev-Container-Features für Azure

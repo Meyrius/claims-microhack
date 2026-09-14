@@ -12,7 +12,8 @@
             "enableNonRootDocker": "true"
         },
         "ghcr.io/devcontainers/features/node:1": {
-            "version": "lts"
+            "version": "lts",
+            "pnpmVersion": "none"
         }
     },
     "postCreateCommand": "bash .devcontainer/post-create.sh",

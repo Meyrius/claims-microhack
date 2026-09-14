@@ -68,11 +68,61 @@ Python must report version 3.11 because the project pins `>=3.11,<3.12`.
 
 #### Optional private package registries
 
-The Dev Container uses the public npm and PyPI registries by default. If your
-organization requires private package mirrors, copy
-`.devcontainer/local.env.example` to `.devcontainer/local.env`, uncomment the
-registry variables, and replace their placeholder hosts. The local override is
-excluded from Git, so customer-specific proxy URLs or credentials aren't published.
+The Dev Container uses the public npm and PyPI registries by default. Corporate
+networks commonly use one or both of these controls:
+
+* A **package registry mirror** replaces `registry.npmjs.org` or `pypi.org` with an
+	approved internal package source.
+* A **forward proxy** carries outbound HTTP and HTTPS traffic without changing the
+	package source URL.
+
+On a new clone, create the local override **before** selecting **Reopen in Container**.
+On macOS or Linux:
+
+```bash
+cp .devcontainer/local.env.example .devcontainer/local.env
+```
+
+On Windows PowerShell:
+
+```powershell
+Copy-Item .devcontainer/local.env.example .devcontainer/local.env
+```
+
+Open `.devcontainer/local.env`, uncomment the package registry variables, and replace
+the placeholder hosts. If your organization uses a forward proxy, uncomment
+`HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` as required. Quote values containing
+shell-special characters and URL-encode proxy credentials. When the organization
+installs its trusted CA in the container, `UV_NATIVE_TLS=true` makes uv use that system
+trust store. Do not disable TLS certificate verification. The local override is
+excluded from Git, so customer-specific URLs and credentials aren't published.
+
+Dev Container startup has two separate network phases:
+
+1. Docker builds the image and downloads the base image, pinned uv image, locked Dev
+	Container features, and their installation assets. `.devcontainer/local.env` is not
+	available in this phase. Configure the proxy and trusted corporate CA in Docker
+	Desktop or the Dev Box host when these downloads are restricted.
+2. The running container executes `.devcontainer/post-create.sh`. This script loads
+	`.devcontainer/local.env` before the uv binary resolves the Python environment.
+	The pinned uv binary is copied from its official container image because restricted
+	PyPI mirrors may not carry uv itself. The Node feature intentionally skips the
+	unused `pnpm` installation, so the image build does not contact the public npm
+	registry for that package.
+
+After changing Docker network settings or `.devcontainer/devcontainer.json`, run
+**Dev Containers: Rebuild Container Without Cache**. After changing only
+`.devcontainer/local.env`, run **Dev Containers: Rebuild Container** or execute the
+post-create script again from an existing container:
+
+```bash
+bash .devcontainer/post-create.sh
+```
+
+If the log fails in a `dev_containers_target_stage` step, the problem belongs to the
+image-build phase and must be fixed in Docker or Dev Box networking. If it fails after
+`Using local package and proxy settings`, verify the local registry/proxy values and
+the corporate CA without posting their credentials in an issue or chat.
 
 ### 2. Sign in to the customer Azure subscription
 

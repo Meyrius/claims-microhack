@@ -146,6 +146,12 @@ choice between Codespaces and local development, dependency installation, Azure
 authentication, deployment or connection of customer-owned resources, local
 configuration, and validation required before beginning the build challenges.
 
+Corporate package mirrors and forward proxies require a local, Git-ignored
+`.devcontainer/local.env`. Create it before the first **Reopen in Container**. Docker
+or Dev Box proxy and CA settings are separate because image and feature downloads
+happen before the container can read that file. Challenge 1 includes the exact setup
+and troubleshooting steps.
+
 The underlying setup commands and resource contract are documented in
 [`labautomation/`](./labautomation/README.md). No externally provisioned lab account or
 environment is required.
