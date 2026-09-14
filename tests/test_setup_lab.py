@@ -1,6 +1,7 @@
 import json
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -124,6 +125,25 @@ class AuthenticationModeTests(unittest.TestCase):
 
 
 class BootstrapSecurityTests(unittest.TestCase):
+    def test_long_azure_operation_reports_periodic_progress(self) -> None:
+        completed = subprocess.CompletedProcess(args=["az"], returncode=0, stdout="", stderr="")
+
+        def delayed_run(*_: object, **__: object) -> subprocess.CompletedProcess[str]:
+            time.sleep(0.03)
+            return completed
+
+        with (
+            patch.object(setup_lab, "AZURE_PROGRESS_INTERVAL_SECONDS", 0.01),
+            patch("subprocess.run", side_effect=delayed_run),
+            patch("builtins.print") as output,
+        ):
+            setup_lab.AzureCli("subscription").run(
+                "deployment", "group", "what-if", progress_label="What-if preview"
+            )
+
+        printed = " ".join(str(call) for call in output.call_args_list)
+        self.assertIn("What-if preview still running", printed)
+
     def test_secret_cli_failure_redacts_stderr(self) -> None:
         cli = setup_lab.AzureCli("00000000-0000-0000-0000-000000000000")
         failed = subprocess.CompletedProcess(
@@ -141,6 +161,43 @@ class BootstrapSecurityTests(unittest.TestCase):
 
         self.assertNotIn("TOP-SECRET", str(context.exception))
         self.assertIn("reading a secret", str(context.exception))
+
+    def test_non_secret_cli_failure_preserves_actionable_stderr(self) -> None:
+        cli = setup_lab.AzureCli("00000000-0000-0000-0000-000000000000")
+        failed = subprocess.CompletedProcess(
+            args=["az"],
+            returncode=1,
+            stdout="",
+            stderr="ERROR: The request may be blocked by network rules of storage account.",
+        )
+
+        with (
+            patch("subprocess.run", return_value=failed),
+            self.assertRaises(setup_lab.SetupError) as context,
+        ):
+            cli.run("storage", "container", "exists", secret=False)
+
+        self.assertEqual(
+            "The request may be blocked by network rules of storage account.",
+            str(context.exception),
+        )
+
+    def test_entra_storage_calls_are_not_marked_secret(self) -> None:
+        config = json.loads(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
+        config["subscriptionId"] = "11111111-1111-1111-1111-111111111111"
+
+        class FakeCli:
+            def run(self, *arguments: str, **kwargs: object) -> object:
+                if arguments[:3] == ("rest", "--method", "get"):
+                    return {"properties": {"allowSharedKeyAccess": False}}
+                self.secret = kwargs.get("secret")
+                raise setup_lab.SetupError("blocked by network rules")
+
+        cli = FakeCli()
+        with self.assertRaisesRegex(setup_lab.SetupError, "blocked by network rules"):
+            setup_lab.ensure_containers_and_data(config, cli)
+
+        self.assertIs(False, cli.secret)
 
     def test_write_env_contains_contract_without_printing_secrets(self) -> None:
         values = {

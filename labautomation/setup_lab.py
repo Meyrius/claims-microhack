@@ -11,6 +11,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +33,7 @@ SEARCH_SERVICE_CONTRIBUTOR_ROLE_ID = "7ca78c08-252a-4471-8644-bb5ff32d4ba0"
 SEARCH_INDEX_DATA_READER_ROLE_ID = "1407120a-92aa-4202-b7e9-c0e197c71c8f"
 STORAGE_BLOB_DATA_READER_ROLE_ID = "2a2b9908-6ea1-4ae2-8e65-a410df84e7d1"
 STORAGE_BLOB_DATA_CONTRIBUTOR_ROLE_ID = "ba92f5b4-2d11-453d-a403-e96b0029c9fe"
+AZURE_PROGRESS_INTERVAL_SECONDS = 30
 
 
 class SetupError(RuntimeError):
@@ -42,6 +44,34 @@ class SetupError(RuntimeError):
 class ResourceRef:
     resource_group: str
     name: str
+
+
+def _run_process_with_progress(
+    command: list[str],
+    environment: dict[str, str] | None,
+    progress_label: str,
+) -> subprocess.CompletedProcess[str]:
+    stop_reporting = threading.Event()
+
+    def report_progress() -> None:
+        elapsed = AZURE_PROGRESS_INTERVAL_SECONDS
+        while not stop_reporting.wait(AZURE_PROGRESS_INTERVAL_SECONDS):
+            print(f"  {progress_label} still running ({elapsed}s elapsed)...", flush=True)
+            elapsed += AZURE_PROGRESS_INTERVAL_SECONDS
+
+    reporter = threading.Thread(target=report_progress, daemon=True)
+    reporter.start()
+    try:
+        return subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            env=environment,
+        )
+    finally:
+        stop_reporting.set()
+        reporter.join()
 
 
 class AzureCli:
@@ -56,6 +86,7 @@ class AzureCli:
         secret: bool = False,
         environment: dict[str, str] | None = None,
         allow_not_found: bool = False,
+        progress_label: str = "",
     ) -> Any:
         command = ["az", *arguments, "--subscription", self.subscription_id]
         if expect_json:
@@ -65,13 +96,16 @@ class AzureCli:
             if environment:
                 process_environment = os.environ.copy()
                 process_environment.update(environment)
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                check=False,
-                env=process_environment,
-            )
+            if progress_label:
+                result = _run_process_with_progress(command, process_environment, progress_label)
+            else:
+                result = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    env=process_environment,
+                )
         except FileNotFoundError as exc:
             raise SetupError("Azure CLI was not found. Install 'az' and run the command again.") from exc
         if result.returncode != 0:
@@ -82,6 +116,8 @@ class AzureCli:
             ):
                 return None
             details = "Azure CLI returned an error while reading a secret." if secret else result.stderr.strip()
+            if not secret and details.lower().startswith("error:"):
+                details = details[6:].lstrip()
             raise SetupError(details or f"Azure CLI command failed: {' '.join(command[:3])}")
         output = result.stdout.strip()
         if expect_json:
@@ -366,12 +402,14 @@ def deploy(config: dict[str, Any], cli: AzureCli, what_if: bool) -> None:
             f"@{parameter_file}",
         )
         print("Validating the Azure deployment...")
-        cli.run("deployment", "group", "validate", *common)
+        cli.run(
+            "deployment", "group", "validate", *common, progress_label="Deployment validation"
+        )
         if what_if:
             print("Previewing Azure changes...")
-            cli.run("deployment", "group", "what-if", *common)
+            cli.run("deployment", "group", "what-if", *common, progress_label="What-if preview")
         print("Deploying Azure resources...")
-        cli.run("deployment", "group", "create", *common)
+        cli.run("deployment", "group", "create", *common, progress_label="Resource deployment")
     finally:
         parameter_file.unlink(missing_ok=True)
 
@@ -799,6 +837,7 @@ def check_connections(config: dict[str, Any], cli: AzureCli) -> None:
 
 def check_storage_data(config: dict[str, Any], cli: AzureCli) -> None:
     storage_arguments, storage_environment = _storage_data_access(config, cli)
+    contains_secret = storage_environment is not None
     for container_name in (
         config["claims"]["containerName"],
         config["policies"]["containerName"],
@@ -815,7 +854,7 @@ def check_storage_data(config: dict[str, Any], cli: AzureCli) -> None:
             "tsv",
             *storage_arguments,
             environment=storage_environment,
-            secret=True,
+            secret=contains_secret,
         )
         if exists.lower() != "true":
             raise SetupError(f"Storage container '{container_name}' is missing. Run setup_lab.py configure.")
@@ -834,7 +873,7 @@ def check_storage_data(config: dict[str, Any], cli: AzureCli) -> None:
             "tsv",
             *storage_arguments,
             environment=storage_environment,
-            secret=True,
+            secret=contains_secret,
         ).splitlines()
     )
     expected_policy_names = {path.name for path in (REPO_ROOT / "data" / "policies").glob("*.md")}
@@ -948,6 +987,7 @@ def _foundry_key(config: dict[str, Any], cli: AzureCli) -> str:
 
 def ensure_containers_and_data(config: dict[str, Any], cli: AzureCli) -> None:
     storage_arguments, storage_environment = _storage_data_access(config, cli)
+    contains_secret = storage_environment is not None
     for container_name in (
         config["claims"]["containerName"],
         config["policies"]["containerName"],
@@ -960,7 +1000,7 @@ def ensure_containers_and_data(config: dict[str, Any], cli: AzureCli) -> None:
             container_name,
             *storage_arguments,
             environment=storage_environment,
-            secret=True,
+            secret=contains_secret,
         )
 
     policies_path = REPO_ROOT / "data" / "policies"
@@ -978,7 +1018,7 @@ def ensure_containers_and_data(config: dict[str, Any], cli: AzureCli) -> None:
         "true",
         *storage_arguments,
         environment=storage_environment,
-        secret=True,
+        secret=contains_secret,
     )
     print("  [ok] Storage containers and policy documents")
 
@@ -1151,9 +1191,16 @@ def main() -> int:
             configure(config, cli)
         elif args.command == "all":
             if config["mode"] == "deploy":
+                print("[1/3] Deploying the Azure lab stack")
                 deploy(config, cli, args.what_if)
+                print("[2/3] Configuring access and Foundry connections")
+            else:
+                print("[1/2] Configuring access and Foundry connections")
             connect(config, cli)
+            final_phase = "[3/3]" if config["mode"] == "deploy" else "[2/2]"
+            print(f"{final_phase} Uploading policies and writing the environment file")
             configure(config, cli)
+            print("Setup complete.")
         elif args.command == "cleanup":
             cleanup(config, cli, args.yes)
         return 0

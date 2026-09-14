@@ -196,6 +196,12 @@ Run the complete setup:
 python labautomation/setup_lab.py --config labautomation/customer-resources.json all --what-if
 ```
 
+> **Allow time for this step:** The command can run for several tens of minutes,
+> depending on Azure resource and model deployment times. `--what-if` adds a preview
+> before the actual deployment; it does not skip deployment. Keep the terminal open.
+> The setup prints phase changes and periodic status updates while Azure operations
+> are still running.
+
 In `deploy` mode, the command validates the ARM template, displays a What-if preview,
 deploys the resources, configures access, creates the Foundry connections, uploads the
 policy documents, and writes `.env`.
@@ -233,6 +239,8 @@ they can list the Search admin key and have Storage Blob Data Contributor access
 
 ### 5. Validate the environment
 
+![Resources deployed in the Azure resource group](images/resource-group-resources.png)
+
 Verify the selected Azure resources and model deployments:
 
 ```bash
@@ -261,6 +269,44 @@ base.
 * **Blob upload is denied:** Rerun `connect`, confirm the participant has Storage Blob
 	Data Contributor, and verify the Storage network policy permits the Dev Container's
 	data-plane connection.
+* **Blob upload reports that Storage network rules may block the request:** Check the
+	account with `az storage account show --name <storage-name> --resource-group
+	<resource-group> --query publicNetworkAccess`. If it returns `Disabled`, and an
+	update immediately returns to `Disabled`, an inherited Azure Policy is modifying the
+	account. Ask the customer's Azure administrator to identify the effective policy
+	assignment and its definition reference that modifies `publicNetworkAccess`.
+	Ask the Azure administrator for a private endpoint reachable from the development
+	environment or an approved, time-limited exemption scoped to the Storage account.
+	An administrator with `Microsoft.Authorization/policyExemptions/write` can exempt
+	only that public-network rule from the customer's policy assignment:
+
+	```bash
+	az policy exemption create \
+	  --name claims-storage-public-network-lab \
+	  --display-name "Claims MicroHack Storage network access" \
+	  --description "Temporary exception for uploading MicroHack lab data" \
+	  --exemption-category Waiver \
+	  --expires-on "<ISO-8601-expiration>" \
+	  --scope "<storage-resource-id>" \
+	  --policy-assignment "<effective-policy-assignment-id>" \
+	  --policy-definition-reference-ids "<public-network-policy-reference-id>"
+	az storage account update --ids "<storage-resource-id>" \
+	  --public-network-access Enabled
+	python labautomation/setup_lab.py \
+	  --config labautomation/customer-resources.json configure
+	```
+
+	Use literal IDs or define and verify shell variables in the same terminal; an empty
+	`--scope` produces an authorization error at `/providers/Microsoft.Authorization/
+	policyExemptions/...`. Do not make the setup create this governance exception
+	automatically. After the lab, disable public access before deleting the exemption:
+
+	```bash
+	az storage account update --ids "<storage-resource-id>" \
+	  --public-network-access Disabled
+	az policy exemption delete --name claims-storage-public-network-lab \
+	  --scope "<storage-resource-id>"
+	```
 * **A model deployment isn't found:** Correct its deployment name in the customer
 	configuration or deploy that model in the configured Foundry account.
 * **ARM reports unavailable model, SKU, capacity, or quota:** Select a region and
