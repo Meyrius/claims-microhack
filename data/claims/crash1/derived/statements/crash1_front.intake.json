@@ -1,6 +1,6 @@
 {
   "status": "success",
-  "image_path": "C:\\Users\\martasantos\\OneDrive - Microsoft\\FY27\\claims-microhack\\data\\claims\\crash1\\raw\\statements\\crash1_front.jpeg",
+  "image_path": "data/claims/crash1/raw/statements/crash1_front.jpeg",
   "processed_at_utc": "2026-07-26T17:26:48.642677+00:00",
   "ocr": {
     "model": "mistral-document-ai-2512",

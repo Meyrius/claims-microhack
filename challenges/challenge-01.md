@@ -2,120 +2,233 @@
 
 **[Home](../README.md)** | [Next challenge](challenge-02.md)
 
-## 🎯 Objective
+## Objective
 
-Sign in with your assigned lab credentials, verify the pre-provisioned Azure resources, and start the GitHub Codespaces development environment used throughout the Claims Intelligence MicroHack.
+Prepare a development environment and connect the microhack to Azure resources in
+your own tenant and subscription. You can work in GitHub Codespaces or locally, and
+you can deploy an isolated lab stack or connect resources your organization already
+owns.
 
-## 🧭 Context and Background
+## Before you begin
 
-The remaining challenges use a pre-provisioned Azure environment and a repository hosted on GitHub. You will work from a GitHub Codespace configured with the tools and dependencies required to build the claims intelligence solution.
+You need:
 
-Complete this setup with the credentials provided in your Hackbox. Use the assigned lab account rather than a personal or work account so that you have access to the correct Azure subscription, resource group, GitHub organization, and repository.
+* access to this repository;
+* Python 3.11 and `uv` 0.9.17 or later;
+* Azure CLI and an authenticated Azure account;
+* an Azure subscription where you can read the selected resources and list the Search
+	admin key; and
+* permission to create role assignments on the Foundry, Search, and Storage resources.
 
-## ✅ Tasks
+In `deploy` mode, you also need permission to create a resource group, Foundry
+resources and model deployments, Azure AI Search, Storage, and ARM deployments. Azure
+Contributor can create resources but can't create role assignments. An administrator
+can run the connection phase separately when your organization splits these duties.
+See [Foundry RBAC](https://learn.microsoft.com/azure/ai-foundry/concepts/rbac-azure-ai-foundry)
+and [Azure AI Search RBAC](https://learn.microsoft.com/azure/search/search-security-rbac).
+The setup supports Foundry and Storage resources with local authentication disabled:
+model calls and Blob operations then use Microsoft Entra ID. The Search service must
+still allow its admin key for the supplied challenge scripts and Foundry connection.
 
-### 1. Sign in to Azure
+## Tasks
 
-Open the [Azure portal](https://portal.azure.com) and sign in with the credentials provided in your Hackbox.
+### 1. Choose a development environment
 
-When prompted to choose an account, select **Use another account** and input the credentials provided. Do not use your personal or work account.
+#### Option A: GitHub Codespaces
 
-![Sign in to the Azure portal with another account](/challenges/images/azureportal.png)
+Open the repository on GitHub, select **Code** > **Codespaces** > **New with
+options**, and choose the **Python 3** dev container configuration. Wait for its
+post-create command to install the pinned dependencies.
 
-In the Azure portal, select **Resource groups** from the navigation menu.
+#### Option B: Local VS Code or terminal
 
-![Resource groups in the Azure portal navigation menu](/challenges/images/resource-groups.png)
-
-Open the resource group assigned to you and confirm that its resources have been deployed successfully.
-
-![Resources deployed in the assigned resource group](/challenges/images/resource-group-resources.png)
-
-Verify that you can access the resources used in the later challenges, including the Microsoft Foundry project, the `gpt-5.4` and `mistral-document-ai-2512` model deployments, the Azure AI Search service, and the Storage account.
-
-### 2. Sign in to GitHub
-
-Open [GitHub](https://github.com) and sign in with the credentials provided in your Hackbox.
-
-When prompted to choose an account, select **Use another account**. Do not use your personal or work account.
-
-![Sign in to GitHub with another account](/challenges/images/github-login.png)
-
-Select **Sign in with your identity provider**, then use the assigned lab account to authenticate.
-
-Open the organization associated with your lab account.
-
-![GitHub organization selector](/challenges/images/github-organization.png)
-
-Select the organization available to you, then open the `microhack` repository. Confirm that you can see the repository files and folders.
-
-![Files and folders in the GitHub repository](/challenges/images/github-repository.png)
-
-### 3. Create the development environment
-
-From the repository page, select **Code**, then open the **Codespaces** tab. Select the `...` menu and choose **New with options**.
-
-![Create a GitHub Codespace with options](/challenges/images/github-codespaces.png)
-
-For **Dev container configuration**, select **Claims Hack**, then select **Create codespace**.
-
-GitHub opens the Codespace in a new browser tab. Wait for the container setup to finish, then confirm that the repository files are visible in the Explorer and that the integrated terminal opens without errors.
-
-Open a terminal in the Codespace (Terminal > New Terminal) and run the following command to verify that the required tools are installed:
+Clone and open the repository. Confirm the local tools, then install the pinned
+environment:
 
 ```bash
+python --version
 az --version
+python -m pip install uv==0.9.17
+uv sync
 ```
 
-Install the pinned project dependencies and activate the Python environment:
+Activate the environment on macOS, Linux, or in a Codespace:
 
 ```bash
-uv sync --frozen
 source .venv/bin/activate
 ```
 
-Sign in to Azure from the Codespace terminal with the assigned lab account:
+On Windows PowerShell, use:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+Python must report version 3.11 because the project pins `>=3.11,<3.12`.
+
+#### Optional private package registries
+
+The Dev Container uses the public npm and PyPI registries by default. If your
+organization requires private package mirrors, copy
+`.devcontainer/local.env.example` to `.devcontainer/local.env`, uncomment the
+registry variables, and replace their placeholder hosts. The local override is
+excluded from Git, so customer-specific proxy URLs or credentials aren't published.
+
+### 2. Sign in to the customer Azure subscription
+
+Use your organization-provided Azure identity:
+
+```bash
+az login
+az account set --subscription "<subscription-id>"
+az account show --query "{subscription:name, subscriptionId:id, tenantId:tenantId}"
+```
+
+For a browser-based Codespace, you can use device-code authentication:
 
 ```bash
 az login --use-device-code
 ```
 
-From the repository root, run the setup script with the resource group name provided
-in your Hackbox:
+Confirm that the displayed tenant and subscription are the ones where the lab should
+run. The setup refuses to continue when `tenantId` in the customer configuration does
+not match the active Azure CLI session.
+
+### 3. Create the customer resource configuration
+
+On macOS, Linux, or in a Codespace:
 
 ```bash
-bash labautomation/get-keys.sh --resource-group "<your-resource-group-name>"
+cp labautomation/customer-resources.example.json labautomation/customer-resources.json
 ```
 
-The script locates the latest successful Claims MicroHack deployment and creates a
-local `.env` file at the repository root. It retrieves the Foundry project endpoint,
-Mistral Document AI key and endpoint, Azure AI Search key and endpoint, and Storage
-connection string required by Challenges 2 through 6. The file is excluded from Git,
-written with permissions `600`, and its secret values are not displayed.
+On Windows PowerShell:
 
-Confirm that the participant CLI is available:
+```powershell
+Copy-Item labautomation/customer-resources.example.json labautomation/customer-resources.json
+```
+
+Open `labautomation/customer-resources.json` and set:
+
+* `subscriptionId`, optional `tenantId`, and `location`;
+* your Microsoft Entra user object ID in `participantObjectId`; retrieve it with
+	`az ad signed-in-user show --query id --output tsv`;
+* globally unique Foundry, Search, and Storage names;
+* the Foundry project name; and
+* model deployment names and capacities available in your subscription.
+
+The file contains resource identifiers, not secrets. It is excluded from Git.
+
+Choose one mode:
+
+* **`deploy`:** All resource groups under `resources` must match
+	`deployment.resourceGroup`. The setup creates the complete isolated lab stack.
+* **`existing`:** Set the exact names and resource groups of your existing Foundry
+	account and project, Search service, and Storage account. Resources can be in
+	different resource groups but must be in the configured tenant and subscription.
+	Both configured model deployments must already exist.
+
+Before selecting a region for `deploy`, verify that the primary and Document AI models
+and enough quota are available for your subscription. Model availability is not the
+same in every region.
+
+Validate the configuration locally without changing Azure:
+
+```bash
+python labautomation/setup_lab.py --config labautomation/customer-resources.json check
+```
+
+### 4. Prepare the Azure resources
+
+Run the complete setup:
+
+```bash
+python labautomation/setup_lab.py --config labautomation/customer-resources.json all --what-if
+```
+
+In `deploy` mode, the command validates the ARM template, displays a What-if preview,
+deploys the resources, configures access, creates the Foundry connections, uploads the
+policy documents, and writes `.env`.
+
+In `existing` mode, it skips ARM deployment. It validates the explicitly named
+resources and model deployments, configures access and Foundry connections, creates
+the Blob containers when needed, uploads the policy documents, and writes `.env`.
+
+No secret values are displayed. The repository-root `.env` is excluded from Git and
+restricted to the current user where the operating system supports file permissions.
+When Foundry local authentication is disabled, the Mistral scripts use
+`DefaultAzureCredential`. When Storage shared keys are disabled, Blob upload uses the
+participant identity and the Search knowledge source uses its managed identity. Search
+continues to use an admin key. This mixed setup is intended for the time-boxed lab, not
+as a production identity and network design.
+
+The deploy template enables the Storage public endpoint so the local Dev Container can
+upload the lab files, while shared-key authentication remains disabled. Customer Azure
+Policies can deny the deployment or change these settings. If that happens, review the
+effective policy assignments with the customer's Azure administrator and use an
+approved exception or private-connectivity design for that environment.
+
+If an administrator must perform role assignments separately, set
+`deployment.deployRoleAssignments` to `false` before deployment, then run the phases
+as:
+
+```bash
+python labautomation/setup_lab.py --config labautomation/customer-resources.json deploy --what-if
+python labautomation/setup_lab.py --config labautomation/customer-resources.json connect
+python labautomation/setup_lab.py --config labautomation/customer-resources.json configure
+```
+
+The administrator can run `connect`; the participant can then run `configure` when
+they can list the Search admin key and have Storage Blob Data Contributor access.
+
+### 5. Validate the environment
+
+Verify the selected Azure resources and model deployments:
+
+```bash
+python labautomation/setup_lab.py --config labautomation/customer-resources.json check --azure
+```
+
+Confirm that the participant CLI and `.env` contract load:
 
 ```bash
 python docs/claims-intake-agent.py --help
 ```
 
-> [!IMPORTANT]
-> Do not run `labautomation/deploy-lab.ps1`. The MicroHack platform invokes that
-> script before the lab begins. Participants run only `labautomation/get-keys.sh`
-> after the platform deployment succeeds.
+At this point Azure contains the services, model deployments, containers, access
+assignments, and Foundry connections. Challenge 2 deliberately creates and populates
+the `crash-statements` Search index and creates its knowledge source and knowledge
+base.
 
-## 🚀 Go Further
+## Troubleshooting
 
-Review the [solution architecture](../README.md#architecture) and identify where each deployed Azure resource is used in the five build challenges.
+* **Azure CLI uses the wrong tenant or subscription:** Run `az logout`, then sign in
+	again with `az login --tenant <tenant-id>` and select the subscription.
+* **A role assignment fails:** Ask an Owner, User Access Administrator, or Role Based
+	Access Control Administrator at the affected resource scope to run `connect`.
+* **The Search key can't be listed:** Search local authentication must be enabled and
+	the setup identity needs permission to list the configured service's admin keys.
+* **Blob upload is denied:** Rerun `connect`, confirm the participant has Storage Blob
+	Data Contributor, and verify the Storage network policy permits the Dev Container's
+	data-plane connection.
+* **A model deployment isn't found:** Correct its deployment name in the customer
+	configuration or deploy that model in the configured Foundry account.
+* **ARM reports unavailable model, SKU, capacity, or quota:** Select a region and
+	capacity supported by the customer subscription, then rerun setup.
+* **A Codespace doesn't finish starting:** Review its creation log and rebuild the
+	container. The same setup can also be run from a local Python 3.11 environment.
 
-## 🛠️ Troubleshooting
+## Cleanup
 
-- **The Azure resource group is missing:** Confirm that you signed in with the assigned lab account and selected the assigned subscription in the Azure portal.
-- **The setup script reports an authorization error:** Confirm that the Codespace is signed in with the assigned lab account. That account must be able to read deployment outputs and list keys for the Foundry, Azure AI Search, and Storage resources.
-- **The GitHub organization or repository is missing:** Sign out of GitHub, then sign in again through **Sign in with your identity provider** using the Hackbox credentials.
-- **The dev container configuration is unavailable:** Confirm that you opened the assigned `microhack` repository before creating the Codespace.
-- **The Codespace does not finish starting:** Review the creation log for the failing step, then rebuild the container or recreate the Codespace.
+For `deploy` mode only, remove the resource group when the lab is finished:
 
-## 🧠 Conclusion
+```bash
+python labautomation/setup_lab.py --config labautomation/customer-resources.json cleanup --yes
+```
 
-You have verified the Azure resources and opened the configured development environment.
-Continue to [Challenge 2](challenge-02.md) to build the Claims Intake Agent.
+Cleanup refuses to delete resources configured with `existing` mode.
+
+## Conclusion
+
+Your development environment and customer-owned Azure resources are ready. Continue
+to [Challenge 2](challenge-02.md) to build the Claims Intake Agent.

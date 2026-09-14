@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "mode": "deploy",
+  "subscriptionId": "00000000-0000-0000-0000-000000000000",
+  "tenantId": "",
+  "location": "westeurope",
+  "participantObjectId": "00000000-0000-0000-0000-000000000000",
+  "deployment": {
+    "name": "claims-microhack",
+    "resourceGroup": "rg-claims-microhack",
+    "createResourceGroup": true,
+    "deployModels": true,
+    "deployRoleAssignments": true
+  },
+  "resources": {
+    "foundryAccount": {
+      "resourceGroup": "rg-claims-microhack",
+      "name": "claims-foundry-unique"
+    },
+    "foundryProject": {
+      "name": "claims-project"
+    },
+    "searchService": {
+      "resourceGroup": "rg-claims-microhack",
+      "name": "claims-search-unique"
+    },
+    "storageAccount": {
+      "resourceGroup": "rg-claims-microhack",
+      "name": "claimsstorageunique"
+    }
+  },
+  "models": {
+    "primary": {
+      "deploymentName": "gpt-5.4",
+      "modelName": "gpt-5.4",
+      "format": "OpenAI",
+      "skuName": "GlobalStandard",
+      "capacity": 200
+    },
+    "documentAi": {
+      "deploymentName": "mistral-document-ai-2512",
+      "modelName": "mistral-document-ai-2512",
+      "modelVersion": "1",
+      "format": "Mistral AI",
+      "publisher": "Mistral AI",
+      "skuName": "GlobalStandard",
+      "capacity": 8,
+      "apiVersion": "2024-05-01-preview"
+    }
+  },
+  "search": {
+    "indexName": "crash-statements",
+    "semanticConfigurationName": "crash-statements-semantic-config",
+    "knowledgeSourceName": "crash-statements-ks",
+    "knowledgeBaseName": "crash-statements-kb",
+    "apiVersion": "2023-11-01",
+    "mcpApiVersion": "2026-04-01"
+  },
+  "policies": {
+    "containerName": "policies",
+    "knowledgeSourceName": "policies-blob-ks",
+    "knowledgeBaseName": "policies-kb"
+  },
+  "claims": {
+    "containerName": "claims-data"
+  },
+  "connections": {
+    "searchName": "claims-search",
+    "crashStatementsName": "claims-crash-statements-kb",
+    "policiesName": "claims-policies-kb"
+  },
+  "tags": {
+    "workload": "claims-microhack",
+    "environment": "hackathon"
+  }
+}

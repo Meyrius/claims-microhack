@@ -88,7 +88,8 @@ flowchart TD
 uv sync
 ```
 
-- Keep the Foundry configuration used by Challenges 2-4 in your `.env`.
+- Keep the customer-owned Foundry configuration generated in Challenge 1 in your
+  repository-root `.env`.
 - FIDES ships in `agent-framework-core` and is currently marked experimental.
 
 > [!IMPORTANT]

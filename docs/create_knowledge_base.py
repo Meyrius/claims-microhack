@@ -36,9 +36,16 @@ from dotenv import load_dotenv
 REPO_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(REPO_ROOT / ".env")
 
-SEMANTIC_CONFIG_NAME = "crash-statements-semantic-config"
-POLICIES_KNOWLEDGE_SOURCE_NAME = "policies-blob-ks"
-POLICIES_KNOWLEDGE_BASE_NAME = "policies-kb"
+SEMANTIC_CONFIG_NAME = os.getenv(
+    "FOUNDRY_IQ_SEMANTIC_CONFIG_NAME", "crash-statements-semantic-config"
+)
+POLICIES_KNOWLEDGE_SOURCE_NAME = os.getenv(
+    "FOUNDRY_IQ_POLICIES_KNOWLEDGE_SOURCE_NAME", "policies-blob-ks"
+)
+POLICIES_KNOWLEDGE_BASE_NAME = os.getenv(
+    "FOUNDRY_IQ_POLICIES_KNOWLEDGE_BASE_NAME", "policies-kb"
+)
+MCP_API_VERSION = os.getenv("FOUNDRY_IQ_MCP_API_VERSION", "2026-04-01")
 
 
 def _client_and_endpoint() -> tuple[SearchIndexClient, str]:
@@ -52,8 +59,8 @@ def _client_and_endpoint() -> tuple[SearchIndexClient, str]:
 def ensure_index_ready_for_agentic_retrieval(client: SearchIndexClient, index_name: str) -> None:
     """Make the crash-statements index usable as a knowledge source: retrievable fields + semantic config.
 
-    The index created by `infrastructure/azuredeploy.json`'s deployment script only marks `id` as
-    retrievable, but a search index knowledge source needs every field it references
+    The index created by `index_crash_statements.py` only marks `id` as retrievable,
+    but a search index knowledge source needs every field it references
     (`source_data_fields`) to be retrievable, and agentic retrieval requires a semantic
     configuration. Both attributes can be changed on an existing index without rebuilding it.
     """
@@ -65,20 +72,28 @@ def ensure_index_ready_for_agentic_retrieval(client: SearchIndexClient, index_na
             field.hidden = False
             changed = True
 
-    existing_names = {c.name for c in (index.semantic_search.configurations if index.semantic_search else [])}
+    existing_configurations = list(
+        index.semantic_search.configurations if index.semantic_search else []
+    )
+    existing_names = {configuration.name for configuration in existing_configurations}
     if SEMANTIC_CONFIG_NAME not in existing_names:
+        existing_configurations.append(
+            SemanticConfiguration(
+                name=SEMANTIC_CONFIG_NAME,
+                prioritized_fields=SemanticPrioritizedFields(
+                    title_field=SemanticField(field_name="source_file"),
+                    content_fields=[SemanticField(field_name="content")],
+                    keywords_fields=[SemanticField(field_name="claimant_name")],
+                ),
+            )
+        )
         index.semantic_search = SemanticSearch(
-            default_configuration_name=SEMANTIC_CONFIG_NAME,
-            configurations=[
-                SemanticConfiguration(
-                    name=SEMANTIC_CONFIG_NAME,
-                    prioritized_fields=SemanticPrioritizedFields(
-                        title_field=SemanticField(field_name="source_file"),
-                        content_fields=[SemanticField(field_name="content")],
-                        keywords_fields=[SemanticField(field_name="claimant_name")],
-                    ),
-                )
-            ],
+            default_configuration_name=(
+                index.semantic_search.default_configuration_name
+                if index.semantic_search
+                else SEMANTIC_CONFIG_NAME
+            ),
+            configurations=existing_configurations,
         )
         changed = True
 
@@ -124,7 +139,10 @@ def ensure_knowledge_base(
     )
     client.create_or_update_knowledge_base(knowledge_base=knowledge_base)
     print(f"Knowledge base '{knowledge_base_name}' created or updated.")
-    return f"{search_endpoint.rstrip('/')}/knowledgebases/{knowledge_base_name}/mcp?api-version=2026-04-01"
+    return (
+        f"{search_endpoint.rstrip('/')}/knowledgebases/{knowledge_base_name}/mcp"
+        f"?api-version={MCP_API_VERSION}"
+    )
 
 
 def ensure_policies_knowledge_source(

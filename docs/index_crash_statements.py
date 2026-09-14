@@ -15,12 +15,24 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from azure.identity import DefaultAzureCredential
 from dotenv import load_dotenv
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(REPO_ROOT / ".env")
 STATEMENTS_GLOB = "data/claims/*/raw/statements/*.jpeg"
-SEARCH_API_VERSION = "2023-11-01"
+SEARCH_API_VERSION = os.getenv("FOUNDRY_IQ_SEARCH_API_VERSION", "2023-11-01")
+COGNITIVE_SERVICES_SCOPE = "https://cognitiveservices.azure.com/.default"
+_foundry_credential: DefaultAzureCredential | None = None
+
+
+def _mistral_access_token(api_key: str) -> str:
+    if api_key:
+        return api_key
+    global _foundry_credential
+    if _foundry_credential is None:
+        _foundry_credential = DefaultAzureCredential()
+    return _foundry_credential.get_token(COGNITIVE_SERVICES_SCOPE).token
 
 
 def _search_config() -> tuple[str, str, str]:
@@ -41,6 +53,29 @@ def ensure_search_index(client: httpx.Client) -> None:
 
     response = client.get(index_url, headers=headers)
     if response.status_code == 200:
+        fields = {field.get("name"): field for field in response.json().get("fields", [])}
+        expected_fields = {
+            "id": {"type": "Edm.String", "key": True, "filterable": True},
+            "content": {"type": "Edm.String", "searchable": True},
+            "source_file": {"type": "Edm.String", "filterable": True},
+            "claimant_name": {
+                "type": "Edm.String",
+                "searchable": True,
+                "filterable": True,
+            },
+            "policy_number": {"type": "Edm.String", "filterable": True},
+        }
+        incompatible = [
+            name
+            for name, expected in expected_fields.items()
+            if name not in fields
+            or any(fields[name].get(attribute) != value for attribute, value in expected.items())
+        ]
+        if incompatible:
+            raise RuntimeError(
+                f"Existing Search index '{index_name}' has an incompatible schema for: "
+                f"{', '.join(incompatible)}. Choose a dedicated index name or correct its schema."
+            )
         return
     if response.status_code != 404:
         response.raise_for_status()
@@ -93,8 +128,8 @@ def run_mistral_ocr(image_path: Path, client: httpx.Client) -> dict[str, Any]:
     api_key = os.getenv("MISTRAL_DOCUMENT_AI_KEY", "")
     model = os.getenv("MISTRAL_DOCUMENT_AI_DEPLOYMENT_NAME", "mistral-document-ai-2512")
 
-    if not endpoint or not api_key:
-        raise RuntimeError("Missing Mistral Document AI configuration in .env")
+    if not endpoint:
+        raise RuntimeError("Missing MISTRAL_DOCUMENT_AI_ENDPOINT in .env")
 
     payload = {
         "model": model,
@@ -104,7 +139,10 @@ def run_mistral_ocr(image_path: Path, client: httpx.Client) -> dict[str, Any]:
 
     api_version = os.getenv("MISTRAL_DOCUMENT_AI_API_VERSION", "2024-05-01-preview")
     ocr_endpoint = f"{endpoint}/providers/mistral/azure/ocr?api-version={api_version}"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {_mistral_access_token(api_key)}",
+        "Content-Type": "application/json",
+    }
 
     max_attempts = 5
     for attempt in range(1, max_attempts + 1):
@@ -140,7 +178,10 @@ def upload_document(client: httpx.Client, doc_id: str, source_file: str, ocr_res
     document = {
         "@search.action": "mergeOrUpload",
         "id": doc_id,
-        "content": ocr_result["text"],
+        "content": (
+            f"Statement ID: {doc_id}\nSource File: {source_file}\n\n"
+            f"{ocr_result['text']}"
+        ),
         "source_file": source_file,
         "claimant_name": annotation.get("claimant_name"),
         "policy_number": annotation.get("policy_number"),

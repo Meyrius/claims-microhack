@@ -15,6 +15,7 @@ threshold.
 
 * Complete Challenges 02 and 03
 * Confirm that both Foundry agents exist
+* Keep the customer-owned resource `.env` generated in Challenge 01
 * Use an interactive terminal in case human review is requested
 
 ## Run the solution
@@ -23,8 +24,7 @@ From the repository root, run the covered comprehensive policy case:
 
 ```bash
 cd docs
-python claims-sequential-workflow.py ../data/claims/crash1/raw/statements/crash1_front.jpeg \
-  --policy COMP-AUTO-001
+python claims-sequential-workflow.py ../data/claims/crash1/raw/statements/crash1_front.jpeg --policy COMP-AUTO-001
 ```
 
 Run the default liability-only case:
@@ -36,8 +36,7 @@ python claims-sequential-workflow.py ../data/claims/crash1/raw/statements/crash1
 Exercise a different policy and claim amount:
 
 ```bash
-python claims-sequential-workflow.py ../data/claims/crash1/raw/statements/crash1_front.jpeg \
-  --policy COMM-AUTO-001 --claim-id CLM-2026-007 --amount 28000
+python claims-sequential-workflow.py ../data/claims/crash1/raw/statements/crash1_front.jpeg --policy COMM-AUTO-001 --claim-id CLM-2026-007 --amount 28000
 ```
 
 ## Expected result

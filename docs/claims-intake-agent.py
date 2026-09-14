@@ -6,7 +6,7 @@ import base64
 import json
 import os
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +28,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(REPO_ROOT / ".env")
 
 FOUNDRY_AGENT_NAME = "claims-intake-agent"
+COGNITIVE_SERVICES_SCOPE = "https://cognitiveservices.azure.com/.default"
 FOUNDRY_AGENT_INSTRUCTIONS = (
     "You are the Claims Intake Agent. Before answering, you MUST call the azure_ai_search "
     "tool exactly once to search the crash statements index using key identifying details "
@@ -93,13 +94,21 @@ def _encode_image_as_data_url(image_path: Path) -> tuple[str, str]:
     return f"data:{mime_type};base64,{encoded}", url_type
 
 
+def _output_image_path(image_path: Path) -> str:
+    """Use a portable path for repository assets while retaining external paths."""
+    try:
+        return image_path.resolve().relative_to(REPO_ROOT.resolve()).as_posix()
+    except ValueError:
+        return str(image_path)
+
+
 def run_mistral_ocr(image_path: Path) -> dict[str, Any]:
     endpoint = os.getenv("MISTRAL_DOCUMENT_AI_ENDPOINT", "").rstrip("/")
     api_key = os.getenv("MISTRAL_DOCUMENT_AI_KEY", "")
     model = os.getenv("MISTRAL_DOCUMENT_AI_DEPLOYMENT_NAME", "mistral-document-ai-2512")
 
-    if not endpoint or not api_key:
-        raise RuntimeError("Missing Mistral Document AI configuration in .env")
+    if not endpoint:
+        raise RuntimeError("Missing MISTRAL_DOCUMENT_AI_ENDPOINT in .env")
 
     data_url, url_type = _encode_image_as_data_url(image_path)
 
@@ -114,7 +123,8 @@ def run_mistral_ocr(image_path: Path) -> dict[str, Any]:
 
     api_version = os.getenv("MISTRAL_DOCUMENT_AI_API_VERSION", "2024-05-01-preview")
     ocr_endpoint = f"{endpoint}/providers/mistral/azure/ocr?api-version={api_version}"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    access_token = api_key or DefaultAzureCredential().get_token(COGNITIVE_SERVICES_SCOPE).token
+    headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
 
     with httpx.Client(timeout=300.0) as client:
         response = client.post(ocr_endpoint, headers=headers, json=payload)
@@ -148,22 +158,42 @@ def run_mistral_ocr(image_path: Path) -> dict[str, Any]:
 
 def _get_ai_search_connection_id(client: AIProjectClient) -> str:
     """Find the Azure AI Search connection attached to the Foundry project (Foundry IQ)."""
-    connection = next(
-        (c for c in client.connections.list() if c.type == ConnectionType.AZURE_AI_SEARCH),
-        None,
-    )
+    expected_name = os.getenv("FOUNDRY_IQ_SEARCH_CONNECTION_NAME", "")
+    connections = [
+        connection
+        for connection in client.connections.list()
+        if connection.type == ConnectionType.AZURE_AI_SEARCH
+        or getattr(connection.type, "value", connection.type) == "AzureAI_SEARCH"
+    ]
+    if expected_name:
+        connection = next(
+            (
+                item
+                for item in connections
+                if item.name == expected_name or item.id == expected_name
+            ),
+            None,
+        )
+    else:
+        connection = connections[0] if len(connections) == 1 else None
+
     if connection is None:
+        available = ", ".join(sorted(item.name for item in connections)) or "none"
         raise RuntimeError(
-            "No Azure AI Search connection found on the Foundry project. Complete Task 2 "
-            "(create + populate the crash-statements index) and ensure the AI Search resource "
-            "is connected to your Foundry project."
+            "Could not select an Azure AI Search connection. Set "
+            "FOUNDRY_IQ_SEARCH_CONNECTION_NAME to one of the configured connections. "
+            f"Available connections: {available}."
         )
     return connection.id
 
 
-def _build_foundry_iq_tool(client: AIProjectClient, index_name: str) -> AzureAISearchTool:
+def _build_foundry_iq_tool(
+    client: AIProjectClient,
+    index_name: str,
+    connection_id: str | None = None,
+) -> AzureAISearchTool:
     """Build the Foundry IQ (Azure AI Search) tool that grounds the agent in crash statements."""
-    connection_id = _get_ai_search_connection_id(client)
+    connection_id = connection_id or _get_ai_search_connection_id(client)
     return AzureAISearchTool(
         azure_ai_search=AzureAISearchToolResource(
             indexes=[
@@ -179,12 +209,25 @@ def _build_foundry_iq_tool(client: AIProjectClient, index_name: str) -> AzureAIS
 
 
 def _ensure_foundry_agent(client: AIProjectClient, model_deployment: str, index_name: str) -> None:
-    """Register the Claims Intake Agent or update it when its model changes."""
+    """Register the Claims Intake Agent or update it when its model or Search target changes."""
+    connection_id = _get_ai_search_connection_id(client)
     try:
         client.agents.get(FOUNDRY_AGENT_NAME)
         versions = list(client.agents.list_versions(FOUNDRY_AGENT_NAME))
         latest_version = max(versions, key=lambda version: int(version.version))
-        if latest_version.definition.model == model_deployment:
+        latest_tools = getattr(latest_version.definition, "tools", None) or []
+        search_targets = [
+            index
+            for tool in latest_tools
+            for index in (
+                getattr(getattr(tool, "azure_ai_search", None), "indexes", None) or []
+            )
+        ]
+        if latest_version.definition.model == model_deployment and any(
+            getattr(target, "project_connection_id", None) == connection_id
+            and getattr(target, "index_name", None) == index_name
+            for target in search_targets
+        ):
             return
     except ResourceNotFoundError:
         pass
@@ -192,7 +235,7 @@ def _ensure_foundry_agent(client: AIProjectClient, model_deployment: str, index_
     definition = PromptAgentDefinition(
         model=model_deployment,
         instructions=FOUNDRY_AGENT_INSTRUCTIONS,
-        tools=[_build_foundry_iq_tool(client, index_name)],
+        tools=[_build_foundry_iq_tool(client, index_name, connection_id)],
     )
     client.agents.create_version(agent_name=FOUNDRY_AGENT_NAME, definition=definition)
 
@@ -298,7 +341,7 @@ def run_indexed_claim_intake(claim_reference: str) -> dict[str, Any]:
         "status": "success",
         "input_mode": "foundry_iq",
         "claim_reference": claim_reference,
-        "processed_at_utc": datetime.now(timezone.utc).isoformat(),
+        "processed_at_utc": datetime.now(UTC).isoformat(),
         "ocr": None,
         "extracted_data": _extract_indexed_claim(exact_match["content"]),
         "foundry_iq": foundry_iq,
@@ -335,8 +378,8 @@ def run_claims_intake(image_path: Path) -> dict[str, Any]:
 
     return {
         "status": "success",
-        "image_path": str(image_path),
-        "processed_at_utc": datetime.now(timezone.utc).isoformat(),
+        "image_path": _output_image_path(image_path),
+        "processed_at_utc": datetime.now(UTC).isoformat(),
         "ocr": ocr,
         "extracted_data": ocr.get("document_annotation"),
         "foundry_iq": _extract_foundry_iq_matches(response, index_name),

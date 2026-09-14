@@ -66,8 +66,10 @@ single orchestrated flow:
 
 * Complete [Challenge 2](./challenge-02.md).
 * Keep the repository-root `.env` configuration from the participant setup.
-* Confirm the MicroHack platform or your event coach supplied access to the Foundry
-  project and the Azure Storage account.
+* Confirm that Challenge 1 configured access to the Foundry project, Azure AI Search,
+  and Storage account.
+* Confirm that `setup_lab.py configure` uploaded the five Markdown files from
+  `data/policies/` to the configured policies container.
 
 ## Tasks
 
@@ -84,8 +86,9 @@ python create_knowledge_base.py --policies
 ```
 
 Foundry IQ creates and runs the ingestion resources asynchronously. The five Markdown
-documents already uploaded to the `policies` container become retrievable through the
-knowledge base without application code downloading the blobs.
+documents uploaded by the customer setup to the `policies` container become
+retrievable through the knowledge base without application code downloading the
+blobs.
 
 Expected result:
 
@@ -156,9 +159,9 @@ Found 5 policy document(s) through Foundry IQ:
 This confirms that the Claims Intelligence Agent can retrieve the real policy documents
 uploaded from [`data/policies/`](../data/policies/) through the knowledge base.
 
-If the command reports that no policy documents were found, ask your coach to
-verify the lab deployment and policy upload, then run the verification command
-again.
+If the command reports that no policy documents were found, rerun the customer setup
+`configure` phase, confirm the files in the configured Storage container, wait for the
+knowledge source synchronization to finish, and run the verification command again.
 
 ### Task 4: Run the Claims Intelligence Agent
 

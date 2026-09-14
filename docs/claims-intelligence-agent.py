@@ -185,11 +185,11 @@ the input. Do not call either knowledge-base tool in this mode. Your role is to:
         if connection is None:
             raise RuntimeError(
                 f"No Foundry RemoteTool connection targets '{knowledge_base_name}'. "
-                "Redeploy labautomation/azuredeploy.json, then rerun --setup-agent."
+                "Run labautomation/setup_lab.py connect, then rerun --setup-agent."
             )
         return connection.id
 
-    def _build_policy_knowledge_tool(self) -> MCPTool:
+    def _build_policy_knowledge_tool(self, connection_id: str | None = None) -> MCPTool:
         """Build the MCP tool that retrieves policy documents from Foundry IQ."""
         search_endpoint = (
             os.environ.get("FOUNDRY_IQ_SEARCH_ENDPOINT")
@@ -197,22 +197,26 @@ the input. Do not call either knowledge-base tool in this mode. Your role is to:
         ).rstrip("/")
         if not search_endpoint:
             raise RuntimeError("FOUNDRY_IQ_SEARCH_ENDPOINT is not set. Complete Task 1 first.")
+        mcp_api_version = os.environ.get("FOUNDRY_IQ_MCP_API_VERSION", "2026-04-01")
 
         return MCPTool(
             server_label="policies-knowledge-base",
             server_url=(
                 f"{search_endpoint}/knowledgebases/{POLICIES_KNOWLEDGE_BASE_NAME}"
-                "/mcp?api-version=2026-04-01"
+                f"/mcp?api-version={mcp_api_version}"
             ),
             require_approval="never",
             allowed_tools=["knowledge_base_retrieve"],
-            project_connection_id=self._get_knowledge_connection_id(
-                POLICIES_KNOWLEDGE_BASE_NAME,
-                "FOUNDRY_IQ_POLICIES_CONNECTION_NAME",
-            ),
+            project_connection_id=connection_id
+            or self._get_knowledge_connection_id(
+                    POLICIES_KNOWLEDGE_BASE_NAME,
+                    "FOUNDRY_IQ_POLICIES_CONNECTION_NAME",
+                ),
         )
 
-    def _build_crash_statements_knowledge_tool(self) -> MCPTool:
+    def _build_crash_statements_knowledge_tool(
+        self, connection_id: str | None = None
+    ) -> MCPTool:
         """Build the MCP tool that retrieves indexed crash statements."""
         search_endpoint = (
             os.environ.get("FOUNDRY_IQ_SEARCH_ENDPOINT")
@@ -220,36 +224,62 @@ the input. Do not call either knowledge-base tool in this mode. Your role is to:
         ).rstrip("/")
         if not search_endpoint:
             raise RuntimeError("FOUNDRY_IQ_SEARCH_ENDPOINT is not set. Complete Task 1 first.")
+        mcp_api_version = os.environ.get("FOUNDRY_IQ_MCP_API_VERSION", "2026-04-01")
 
         return MCPTool(
             server_label="crash-statements-knowledge-base",
             server_url=(
                 f"{search_endpoint}/knowledgebases/{CRASH_STATEMENTS_KNOWLEDGE_BASE_NAME}"
-                "/mcp?api-version=2026-04-01"
+                f"/mcp?api-version={mcp_api_version}"
             ),
             require_approval="never",
             allowed_tools=["knowledge_base_retrieve"],
-            project_connection_id=self._get_knowledge_connection_id(
-                CRASH_STATEMENTS_KNOWLEDGE_BASE_NAME,
-                "FOUNDRY_IQ_CRASH_STATEMENTS_CONNECTION_NAME",
-            ),
+            project_connection_id=connection_id
+            or self._get_knowledge_connection_id(
+                    CRASH_STATEMENTS_KNOWLEDGE_BASE_NAME,
+                    "FOUNDRY_IQ_CRASH_STATEMENTS_CONNECTION_NAME",
+                ),
         )
 
     def _ensure_claims_intelligence_agent(self) -> None:
         """Register the unified intelligence agent with its policy knowledge tool."""
+        policy_connection_id = self._get_knowledge_connection_id(
+            POLICIES_KNOWLEDGE_BASE_NAME,
+            "FOUNDRY_IQ_POLICIES_CONNECTION_NAME",
+        )
+        crash_connection_id = self._get_knowledge_connection_id(
+            CRASH_STATEMENTS_KNOWLEDGE_BASE_NAME,
+            "FOUNDRY_IQ_CRASH_STATEMENTS_CONNECTION_NAME",
+        )
+        desired_tools = [
+            self._build_policy_knowledge_tool(policy_connection_id),
+            self._build_crash_statements_knowledge_tool(crash_connection_id),
+        ]
+        desired_tool_signatures = {
+            (
+                tool.server_label,
+                tool.server_url,
+                tool.project_connection_id,
+            )
+            for tool in desired_tools
+        }
         try:
             self.client.agents.get(CLAIMS_INTELLIGENCE_AGENT_NAME)
             versions = list(self.client.agents.list_versions(CLAIMS_INTELLIGENCE_AGENT_NAME))
             latest_version = max(versions, key=lambda version: int(version.version))
             latest_tools = getattr(latest_version.definition, "tools", None) or []
-            latest_tool_labels = {
-                getattr(tool, "server_label", None)
+            latest_tool_signatures = {
+                (
+                    getattr(tool, "server_label", None),
+                    getattr(tool, "server_url", None),
+                    getattr(tool, "project_connection_id", None),
+                )
                 for tool in latest_tools
                 if getattr(tool, "type", None) == "mcp"
             }
             if (
                 latest_version.definition.model == self.model
-                and REQUIRED_MCP_TOOL_LABELS.issubset(latest_tool_labels)
+                and desired_tool_signatures.issubset(latest_tool_signatures)
             ):
                 return
         except ResourceNotFoundError:
@@ -258,10 +288,7 @@ the input. Do not call either knowledge-base tool in this mode. Your role is to:
         definition = PromptAgentDefinition(
             model=self.model,
             instructions=self.get_intelligence_instructions(),
-            tools=[
-                self._build_policy_knowledge_tool(),
-                self._build_crash_statements_knowledge_tool(),
-            ],
+            tools=desired_tools,
         )
         self.client.agents.create_version(
             agent_name=CLAIMS_INTELLIGENCE_AGENT_NAME,

@@ -15,7 +15,7 @@
             "version": "lts"
         }
     },
-    "postCreateCommand": "pip3 install --user uv==0.9.17 && uv sync --frozen",
+    "postCreateCommand": "bash .devcontainer/post-create.sh",
     "customizations": {
         "vscode": {
             "extensions": [
@@ -32,17 +32,12 @@
                 "ms-toolsai.jupyter-renderers",
                 "ms-toolsai.vscode-jupyter-cell-tags",
                 "ms-toolsai.vscode-jupyter-slideshow",
-                "benjaminbenais.copilot-theme",
                 "Azurite.azurite",
                 "ms-azuretools.vscode-azurestorage",
                 "ms-azuretools.vscode-bicep",
-                "vs-publisher-1448185.keyoti-changeallendoflinesequence",
                 "ms-windows-ai-studio.windows-ai-studio",
                 "mechatroner.rainbow-csv"
-            ],
-            "settings": {
-                "workbench.colorTheme": "Copilot Theme"
-            }
+            ]
         }
     }
 }

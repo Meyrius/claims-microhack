@@ -51,6 +51,13 @@ flowchart TD
 The structured intake and policy objects stay in memory. The workflow prints the final
 decision and does not create another local JSON file.
 
+## Prerequisites
+
+* Complete Challenges 1 through 3 using the same customer resource configuration.
+* Keep the generated repository-root `.env` file.
+* Confirm both agents and both RemoteTool connections in the configured Foundry
+    project before running the workflow.
+
 ## Tasks
 
 ### Task 1: Confirm the two Foundry agents (no action needed)
@@ -106,6 +113,11 @@ This mode asks `claims-intake-agent` to retrieve `crash1_front` through its Foun
 tool, converts the retrieved statement text into the intake structure, and continues
 with the same intelligence and human-review steps. The `--claim-id` option remains the
 business workflow identifier; `--indexed-claim` selects the indexed repository claim.
+
+If the workflow reports that Foundry IQ did not return the requested indexed statement,
+rerun `python index_crash_statements.py` from the `docs` directory. This refreshes older
+index documents so their statement IDs and source filenames are present in searchable
+content, then the exact `--indexed-claim` lookup can be ranked correctly.
 
 If the decision is escalated or its confidence is below the configured threshold, the
 workflow changes its status to `PENDING_HUMAN_REVIEW` and pauses. It keeps waiting until

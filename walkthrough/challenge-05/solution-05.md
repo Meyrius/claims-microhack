@@ -14,7 +14,7 @@ payout or disclose private policyholder data.
 ## Prerequisites
 
 * Complete Challenge 04
-* Configure the Foundry endpoint and model environment variables
+* Keep the Foundry endpoint and model values generated in Challenge 01
 * Install the required Agent Framework versions
 
 ## Run the solution

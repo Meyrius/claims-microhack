@@ -126,19 +126,29 @@ By participating in this microhack, you will learn how to:
 
 To complete the microhack, you will need:
 
-* A [GitHub account](https://github.com/signup) and access to the repository
+* Access to this repository, through GitHub Codespaces or a local clone
 * Familiarity with Python, JSON, command-line tools, and generative AI concepts
 * Python 3.11 and [uv](https://docs.astral.sh/uv/)
-* Azure CLI authenticated with the event account used for the lab
-* Azure resources and environment values supplied by the MicroHack platform or your
-	event coach
+* Azure CLI authenticated with an identity in your organization's tenant
+* An Azure subscription where you can deploy an isolated lab stack or access an
+	existing Microsoft Foundry account and project, Azure AI Search service, and Storage
+	account
+* Permission to create role assignments, or help from an administrator for the
+	connection phase; see [Microsoft Foundry RBAC](https://learn.microsoft.com/azure/ai-foundry/concepts/rbac-azure-ai-foundry),
+	[Azure AI Search RBAC](https://learn.microsoft.com/azure/search/search-security-rbac),
+	and [Azure Storage RBAC](https://learn.microsoft.com/azure/storage/blobs/assign-azure-role-data-access)
 
 ### Participant setup
 
 Complete all environment preparation in
 [Challenge 1: Prepare the Environment](./challenges/challenge-01.md). It covers the
-Codespaces setup, dependency installation, Azure authentication, local configuration,
-and validation required before beginning the build challenges.
+choice between Codespaces and local development, dependency installation, Azure
+authentication, deployment or connection of customer-owned resources, local
+configuration, and validation required before beginning the build challenges.
+
+The underlying setup commands and resource contract are documented in
+[`labautomation/`](./labautomation/README.md). No externally provisioned lab account or
+environment is required.
 
 ---
 
@@ -151,7 +161,7 @@ claims-microhack/
 |   |-- claims/                 # Raw and derived sample claim evidence
 |   `-- policies/               # Sample insurance policy documents
 |-- docs/                       # Python agents, workflows, and Function project
-|-- labautomation/              # MicroHack provisioning and Azure deployment template
+|-- labautomation/              # Customer-owned Azure setup and deployment template
 |-- walkthrough/                # Reference solutions for each challenge
 |-- pyproject.toml              # Pinned participant environment
 `-- README.md
@@ -162,7 +172,7 @@ claims-microhack/
 | [`challenges/`](./challenges/)         | Attendees                  | Step-by-step instructions for the five challenges           |
 | [`data/`](./data/)                     | Attendees and scripts      | Accident evidence and policy documents used by the workflow |
 | [`docs/`](./docs/)                     | Attendees                  | Supplied Python agents and orchestration code               |
-| [`labautomation/`](./labautomation/)   | Platform and coaches       | Per-lab provisioning and Azure Resource Manager deployment  |
+| [`labautomation/`](./labautomation/)   | Attendees and Azure admins | Deploy or connect customer-owned Azure resources             |
 | [`walkthrough/`](./walkthrough/)       | Facilitators and attendees | Reference solutions for each challenge                     |
 
 ---
@@ -189,7 +199,7 @@ Each challenge follows a consistent learning path:
 
 | # | Challenge | Description | Duration |
 |---|-----------|-------------|----------|
-| 1 | [Prepare the Environment](./challenges/challenge-01.md) | Verify access to the provisioned Azure resources and development environment used throughout the microhack | 30 min |
+| 1 | [Prepare the Environment](./challenges/challenge-01.md) | Prepare Codespaces or local development and deploy or connect customer-owned Azure resources | 30 min |
 | 2 | [Build the Claims Intake Agent](./challenges/challenge-02.md) | Process accident statements with Mistral Document AI and ground the structured intake in Foundry IQ evidence | 45 min |
 | 3 | [Build the Claims Intelligence Agent](./challenges/challenge-03.md) | Ground one intelligence agent in a Foundry IQ policy knowledge base and produce an auditable coverage decision | 30 min |
 | 4 | [Orchestrate the Two-Agent Claims Workflow](./challenges/challenge-04.md) | Compose intake and intelligence agents with a conditional human-review branch | 45 min |

@@ -14,8 +14,9 @@ coverage decision for the Challenge 02 intake artifact.
 ## Prerequisites
 
 * Complete Challenge 02
-* Configure `AZURE_STORAGE_CONNECTION_STRING` and
-  `AZURE_POLICIES_CONTAINER_NAME`
+* Keep `AZURE_STORAGE_CONNECTION_STRING` and `AZURE_POLICIES_CONTAINER_NAME`
+  from the generated `.env`
+* Confirm `setup_lab.py configure` uploaded `data/policies/*.md`
 * Keep the generated intake artifact under the claim's `derived/statements/`
   folder
 
@@ -40,8 +41,7 @@ python claims-intelligence-agent.py ../data/claims/crash1/derived/statements/cra
 Exercise the comprehensive coverage path:
 
 ```bash
-python claims-intelligence-agent.py ../data/claims/crash1/derived/statements/crash1_front.intake.json \
-  --policy-number COMP-AUTO-001
+python claims-intelligence-agent.py ../data/claims/crash1/derived/statements/crash1_front.intake.json --policy-number COMP-AUTO-001
 ```
 
 ## Expected result
@@ -53,10 +53,11 @@ path and applies its deductible.
 
 ## Troubleshooting
 
-* If no policies are found, redeploy or upload `data/policies/*.md` to the
-  configured policies container
-* If storage configuration is missing, restore the deployment-provided
-  connection string in the environment
+* If no policies are found, rerun `setup_lab.py configure`, then wait for the
+  knowledge source synchronization
+* If storage configuration is missing, regenerate `.env` with the customer setup
+* If an MCP connection is missing, rerun `setup_lab.py connect` and confirm the
+  configured RemoteTool connection names
 * If a policy is unknown, use one of the codes printed by `--verify-policies`
 
 ## Validation checklist
