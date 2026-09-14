@@ -11,7 +11,7 @@ if [[ -f "${local_environment_file}" ]]; then
     echo "Using local package and proxy settings from .devcontainer/local.env."
     set -a
     # shellcheck disable=SC1090
-    source "${local_environment_file}"
+    source <(sed 's/\r$//' "${local_environment_file}")
     set +a
 else
     echo "No .devcontainer/local.env found; using public package registries."
