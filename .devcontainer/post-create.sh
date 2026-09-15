@@ -14,11 +14,11 @@ if [[ -f "${local_environment_file}" ]]; then
     source <(sed 's/\r$//' "${local_environment_file}")
     set +a
 else
-    echo "No .devcontainer/local.env found; using public package registries."
+    echo "No .devcontainer/local.env found; using Microsoft package proxy defaults."
 fi
 
-npm_registry="${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org/}"
-uv_default_index="${UV_DEFAULT_INDEX:-${PIP_INDEX_URL:-https://pypi.org/simple/}}"
+npm_registry="${NPM_CONFIG_REGISTRY:-https://packagefeedproxy.microsoft.io/npm/}"
+uv_default_index="${UV_DEFAULT_INDEX:-https://packagefeedproxy.microsoft.io/pypi/simple/}"
 uv_link_mode="${UV_LINK_MODE:-copy}"
 
 npm config set registry "${npm_registry}"

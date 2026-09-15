@@ -68,15 +68,18 @@ Python must report version 3.11 because the project pins `>=3.11,<3.12`.
 
 #### Optional private package registries
 
-The Dev Container uses the public npm and PyPI registries by default. Corporate
-networks commonly use one or both of these controls:
+The Dev Container uses Microsoft's npm and PyPI package feed proxies by default, so a
+fresh checkout does not need direct access to `registry.npmjs.org`, `pypi.org`, or
+`files.pythonhosted.org`. Corporate networks may additionally use one or both of these
+controls:
 
 * A **package registry mirror** replaces `registry.npmjs.org` or `pypi.org` with an
 	approved internal package source.
 * A **forward proxy** carries outbound HTTP and HTTPS traffic without changing the
 	package source URL.
 
-On a new clone, create the local override **before** selecting **Reopen in Container**.
+When your organization requires different package sources or a forward proxy, create
+the local override **before** selecting **Reopen in Container**.
 On macOS or Linux:
 
 ```bash
