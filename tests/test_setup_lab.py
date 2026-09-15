@@ -311,6 +311,29 @@ class OwnershipTests(unittest.TestCase):
         self.config["subscriptionId"] = "11111111-1111-1111-1111-111111111111"
         self.config["participantObjectId"] = "22222222-2222-2222-2222-222222222222"
 
+    def test_deploy_uses_one_unique_name_for_all_deployment_steps(self) -> None:
+        class FakeCli:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, ...]] = []
+
+            def run(self, *arguments: str, **_: object) -> str:
+                self.calls.append(arguments)
+                if arguments[:2] == ("group", "exists"):
+                    return "true"
+                return ""
+
+        self.config["deployment"]["createResourceGroup"] = False
+        cli = FakeCli()
+
+        with patch.object(setup_lab.uuid, "uuid4", return_value=setup_lab.uuid.UUID(int=1)):
+            setup_lab.deploy(self.config, cli, what_if=True)
+
+        deployment_calls = [call for call in cli.calls if call[:2] == ("deployment", "group")]
+        deployment_names = [call[call.index("--name") + 1] for call in deployment_calls]
+        expected_name = f"{self.config['deployment']['name']}-{'0' * 31}1"
+        self.assertEqual([expected_name] * 3, deployment_names)
+        self.assertLessEqual(len(expected_name), 64)
+
     def test_deploy_refuses_existing_unowned_resource_group(self) -> None:
         class FakeCli:
             def run(self, *arguments: str, **_: object) -> str:

@@ -356,11 +356,17 @@ def _record_resource_group_ownership(config: dict[str, Any]) -> None:
         Path(temporary_name).unlink(missing_ok=True)
 
 
+def _unique_deployment_name(base_name: str) -> str:
+    suffix = uuid.uuid4().hex
+    return f"{base_name[:31]}-{suffix}"
+
+
 def deploy(config: dict[str, Any], cli: AzureCli, what_if: bool) -> None:
     if config["mode"] != "deploy":
         raise SetupError("The deploy command requires configuration mode 'deploy'.")
     deployment = config["deployment"]
     resource_group = deployment["resourceGroup"]
+    deployment_name = _unique_deployment_name(deployment["name"])
     group_exists = cli.run("group", "exists", "--name", resource_group).lower() == "true"
     if deployment.get("createResourceGroup", True):
         if group_exists and not _state_matches(config):
@@ -393,7 +399,7 @@ def deploy(config: dict[str, Any], cli: AzureCli, what_if: bool) -> None:
     try:
         common = (
             "--name",
-            deployment["name"],
+            deployment_name,
             "--resource-group",
             resource_group,
             "--template-file",
