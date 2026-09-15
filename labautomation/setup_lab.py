@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -180,7 +181,31 @@ def load_config(path: Path) -> dict[str, Any]:
     if not isinstance(config, dict):
         raise SetupError("The customer resource configuration must be a JSON object.")
     validate_config(config)
+    _apply_unique_resource_names(config)
     return config
+
+
+def _apply_unique_resource_names(config: dict[str, Any]) -> None:
+    if config["mode"] != "deploy":
+        return
+    deployment = config["deployment"]
+    seed = "/".join(
+        (
+            config["subscriptionId"],
+            deployment["resourceGroup"],
+            config.get("participantObjectId", ""),
+        )
+    )
+    suffix = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:12]
+    resources = config["resources"]
+    for resource_name, maximum_length, separator in (
+        ("foundryAccount", 64, "-"),
+        ("searchService", 60, "-"),
+        ("storageAccount", 24, ""),
+    ):
+        resource = resources[resource_name]
+        available_length = maximum_length - len(separator) - len(suffix)
+        resource["name"] = f"{resource['name'][:available_length]}{separator}{suffix}"
 
 
 def validate_config(config: dict[str, Any]) -> None:

@@ -64,9 +64,10 @@ On Windows PowerShell, use:
 Copy-Item labautomation/customer-resources.example.json labautomation/customer-resources.json
 ```
 
-Set `subscriptionId`, `location`, globally unique resource names, and your Microsoft
-Entra user object ID. Keep `participantObjectId` empty if an administrator manages
-participant access separately.
+Set `subscriptionId`, `location`, resource name prefixes, and your Microsoft Entra user
+object ID. In deploy mode, setup appends a stable participant-specific suffix to the
+Foundry, Search, and Storage names. Keep `participantObjectId` empty if an administrator
+manages participant access separately.
 
 Set `deployment.deployRoleAssignments` to `false` when the deployment identity can
 create resources but a separate administrator will run `setup_lab.py connect`.

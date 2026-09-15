@@ -20,6 +20,41 @@ class SetupConfigTests(unittest.TestCase):
     def test_deploy_example_is_valid(self) -> None:
         setup_lab.validate_config(self.config)
 
+    def test_load_config_adds_stable_participant_specific_resource_suffixes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            config_file = Path(temporary_directory) / "customer-resources.json"
+            config_file.write_text(json.dumps(self.config), encoding="utf-8")
+
+            first = setup_lab.load_config(config_file)
+            second = setup_lab.load_config(config_file)
+            self.config["participantObjectId"] = "33333333-3333-3333-3333-333333333333"
+            config_file.write_text(json.dumps(self.config), encoding="utf-8")
+            other_participant = setup_lab.load_config(config_file)
+
+        for resource_name in ("foundryAccount", "searchService", "storageAccount"):
+            first_name = first["resources"][resource_name]["name"]
+            self.assertEqual(first_name, second["resources"][resource_name]["name"])
+            self.assertNotEqual(
+                first_name,
+                other_participant["resources"][resource_name]["name"],
+            )
+        storage_name = first["resources"]["storageAccount"]["name"]
+        self.assertLessEqual(len(storage_name), 24)
+        self.assertRegex(storage_name, "^[a-z0-9]+$")
+
+    def test_existing_mode_keeps_configured_resource_names(self) -> None:
+        self.config["mode"] = "existing"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            config_file = Path(temporary_directory) / "customer-resources.json"
+            config_file.write_text(json.dumps(self.config), encoding="utf-8")
+
+            loaded = setup_lab.load_config(config_file)
+
+        self.assertEqual(
+            self.config["resources"]["storageAccount"]["name"],
+            loaded["resources"]["storageAccount"]["name"],
+        )
+
     def test_placeholder_subscription_is_rejected(self) -> None:
         self.config["subscriptionId"] = "00000000-0000-0000-0000-000000000000"
 
