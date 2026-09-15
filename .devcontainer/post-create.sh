@@ -28,3 +28,6 @@ if ! UV_DEFAULT_INDEX="${uv_default_index}" UV_LINK_MODE="${uv_link_mode}" uv sy
     echo "Check .devcontainer/local.env and your corporate proxy or CA configuration." >&2
     exit 1
 fi
+
+UV_DEFAULT_INDEX="${uv_default_index}" UV_LINK_MODE="${uv_link_mode}" \
+    uv venv --seed --allow-existing .venv
