@@ -325,6 +325,10 @@ base.
 	configuration or deploy that model in the configured Foundry account.
 * **ARM reports unavailable model, SKU, capacity, or quota:** Select a region and
 	capacity supported by the customer subscription, then rerun setup.
+* **ARM reports `RequestConflict` for the Foundry account:** Wait until no other
+	deployment or portal operation is changing that account, then rerun setup. The ARM
+	template resumes against the same participant-specific resources. Do not start a
+	second setup command while the first one is still running.
 * **A Codespace doesn't finish starting:** Review its creation log and rebuild the
 	container. The same setup can also be run from a local Python 3.11 environment.
 

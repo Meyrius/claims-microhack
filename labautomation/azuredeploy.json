@@ -281,7 +281,7 @@
         }
       },
       "dependsOn": [
-        "[resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName'))]"
+        "[resourceId('Microsoft.CognitiveServices/accounts/projects', parameters('foundryAccountName'), parameters('foundryProjectName'))]"
       ]
     },
     {
@@ -407,6 +407,8 @@
       },
       "dependsOn": [
         "[resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName'))]",
+        "[resourceId('Microsoft.CognitiveServices/accounts/projects', parameters('foundryAccountName'), parameters('foundryProjectName'))]",
+        "[resourceId('Microsoft.CognitiveServices/accounts/deployments', parameters('foundryAccountName'), parameters('documentAiDeploymentName'))]",
         "[resourceId('Microsoft.Search/searchServices', parameters('searchServiceName'))]"
       ]
     },
@@ -427,6 +429,7 @@
       "dependsOn": [
         "[resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName'))]",
         "[resourceId('Microsoft.CognitiveServices/accounts/projects', parameters('foundryAccountName'), parameters('foundryProjectName'))]",
+        "[resourceId('Microsoft.CognitiveServices/accounts/connections', parameters('foundryAccountName'), parameters('searchConnectionName'))]",
         "[resourceId('Microsoft.Search/searchServices', parameters('searchServiceName'))]"
       ]
     },
@@ -447,6 +450,7 @@
       "dependsOn": [
         "[resourceId('Microsoft.CognitiveServices/accounts', parameters('foundryAccountName'))]",
         "[resourceId('Microsoft.CognitiveServices/accounts/projects', parameters('foundryAccountName'), parameters('foundryProjectName'))]",
+        "[resourceId('Microsoft.CognitiveServices/accounts/projects/connections', parameters('foundryAccountName'), parameters('foundryProjectName'), parameters('policiesConnectionName'))]",
         "[resourceId('Microsoft.Search/searchServices', parameters('searchServiceName'))]"
       ]
     }

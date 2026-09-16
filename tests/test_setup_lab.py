@@ -93,6 +93,32 @@ class SetupConfigTests(unittest.TestCase):
 
         self.assertEqual(False, parameters["deployRoleAssignments"]["value"])
 
+    def test_foundry_child_writes_are_serialized(self) -> None:
+        template = json.loads(setup_lab.TEMPLATE_FILE.read_text(encoding="utf-8"))
+        resources = {resource["type"] + ":" + resource["name"]: resource for resource in template["resources"]}
+
+        primary = resources[
+            "Microsoft.CognitiveServices/accounts/deployments:"
+            "[format('{0}/{1}', parameters('foundryAccountName'), parameters('primaryModelDeploymentName'))]"
+        ]
+        shared_connection = resources[
+            "Microsoft.CognitiveServices/accounts/connections:"
+            "[format('{0}/{1}', parameters('foundryAccountName'), parameters('searchConnectionName'))]"
+        ]
+        policies_connection = resources[
+            "Microsoft.CognitiveServices/accounts/projects/connections:"
+            "[format('{0}/{1}/{2}', parameters('foundryAccountName'), parameters('foundryProjectName'), parameters('policiesConnectionName'))]"
+        ]
+        claims_connection = resources[
+            "Microsoft.CognitiveServices/accounts/projects/connections:"
+            "[format('{0}/{1}/{2}', parameters('foundryAccountName'), parameters('foundryProjectName'), parameters('crashStatementsConnectionName'))]"
+        ]
+
+        self.assertIn("accounts/projects", " ".join(primary["dependsOn"]))
+        self.assertIn("documentAiDeploymentName", " ".join(shared_connection["dependsOn"]))
+        self.assertIn("searchConnectionName", " ".join(policies_connection["dependsOn"]))
+        self.assertIn("policiesConnectionName", " ".join(claims_connection["dependsOn"]))
+
     def test_resource_ids_use_explicit_resource_groups(self) -> None:
         self.config["mode"] = "existing"
         self.config["resources"]["searchService"]["resourceGroup"] = "shared-search"
