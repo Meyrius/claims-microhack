@@ -27,7 +27,9 @@ FOUNDRY_API_VERSION = "2025-04-01-preview"
 MODEL_DEPLOYMENT_API_VERSION = "2024-10-01"
 PROJECT_CONNECTION_API_VERSION = "2025-10-01-preview"
 SEARCH_API_VERSION = "2023-11-01"
+SEARCH_OFFERINGS_API_VERSION = "2025-02-01-preview"
 STORAGE_API_VERSION = "2023-05-01"
+STORAGE_SKU_API_VERSION = "2025-06-01"
 FOUNDRY_USER_ROLE_ID = "53ca6127-db72-4b80-b1b0-d745d6d5456d"
 COGNITIVE_SERVICES_USER_ROLE_ID = "a97b65f3-24c7-4388-baec-2e87135dc908"
 SEARCH_SERVICE_CONTRIBUTOR_ROLE_ID = "7ca78c08-252a-4471-8644-bb5ff32d4ba0"
@@ -35,6 +37,7 @@ SEARCH_INDEX_DATA_READER_ROLE_ID = "1407120a-92aa-4202-b7e9-c0e197c71c8f"
 STORAGE_BLOB_DATA_READER_ROLE_ID = "2a2b9908-6ea1-4ae2-8e65-a410df84e7d1"
 STORAGE_BLOB_DATA_CONTRIBUTOR_ROLE_ID = "ba92f5b4-2d11-453d-a403-e96b0029c9fe"
 AZURE_PROGRESS_INTERVAL_SECONDS = 30
+REGION_RECOMMENDATION_LIMIT = 3
 
 
 class SetupError(RuntimeError):
@@ -79,6 +82,7 @@ class AzureCli:
     def __init__(self, subscription_id: str, tenant_id: str = "") -> None:
         self.subscription_id = subscription_id
         self.tenant_id = tenant_id
+        self.executable = shutil.which("az") or "az"
 
     def run(
         self,
@@ -88,8 +92,11 @@ class AzureCli:
         environment: dict[str, str] | None = None,
         allow_not_found: bool = False,
         progress_label: str = "",
+        include_subscription: bool = True,
     ) -> Any:
-        command = ["az", *arguments, "--subscription", self.subscription_id]
+        command = [self.executable, *arguments]
+        if include_subscription:
+            command.extend(["--subscription", self.subscription_id])
         if expect_json:
             command.extend(["--output", "json"])
         try:
@@ -384,6 +391,286 @@ def _record_resource_group_ownership(config: dict[str, Any]) -> None:
 def _unique_deployment_name(base_name: str) -> str:
     suffix = uuid.uuid4().hex
     return f"{base_name[:31]}-{suffix}"
+
+
+def _json_items(payload: Any) -> list[dict[str, Any]]:
+    items = payload.get("value", []) if isinstance(payload, dict) else payload
+    return [item for item in (items or []) if isinstance(item, dict)]
+
+
+def _normalized_location(location: Any) -> str:
+    return "".join(character for character in str(location).casefold() if character.isalnum())
+
+
+def _service_region_support(
+    cli: AzureCli,
+) -> tuple[dict[str, set[str]], list[str]]:
+    support: dict[str, set[str]] = {}
+    issues: list[str] = []
+    for label, namespace, resource_type in (
+        ("Storage account", "Microsoft.Storage", "storageAccounts"),
+        ("Azure AI Search", "Microsoft.Search", "searchServices"),
+        ("Microsoft Foundry", "Microsoft.CognitiveServices", "accounts"),
+    ):
+        provider = cli.run("provider", "show", "--namespace", namespace, expect_json=True)
+        if not isinstance(provider, dict) or str(provider.get("registrationState", "")).casefold() != "registered":
+            issues.append(f"provider '{namespace}' is not registered")
+            continue
+        resource_types = _json_items(provider.get("resourceTypes", []))
+        details = next(
+            (
+                item
+                for item in resource_types
+                if str(item.get("resourceType", "")).casefold() == resource_type.casefold()
+            ),
+            None,
+        )
+        if details is None:
+            issues.append(f"provider '{namespace}' does not expose '{resource_type}'")
+            continue
+        support[label] = {
+            _normalized_location(location) for location in details.get("locations", [])
+        }
+    return support, issues
+
+
+def _storage_skus(config: dict[str, Any], cli: AzureCli) -> list[dict[str, Any]]:
+    identifier = f"/subscriptions/{config['subscriptionId']}/providers/Microsoft.Storage/skus"
+    return _json_items(
+        cli.run(
+            "rest",
+            "--method",
+            "get",
+            "--url",
+            management_url(identifier, STORAGE_SKU_API_VERSION),
+            expect_json=True,
+        )
+    )
+
+
+def _search_basic_regions(cli: AzureCli) -> set[str]:
+    offerings = _json_items(
+        cli.run(
+            "rest",
+            "--method",
+            "get",
+            "--url",
+            management_url(
+                "/providers/Microsoft.Search/offerings", SEARCH_OFFERINGS_API_VERSION
+            ),
+            expect_json=True,
+        )
+    )
+    return {
+        _normalized_location(offering.get("regionName", ""))
+        for offering in offerings
+        if any(
+            str(
+                sku.get("name", "")
+                or (sku.get("sku", {}).get("name", "") if isinstance(sku.get("sku"), dict) else "")
+            ).casefold()
+            == "basic"
+            for sku in offering.get("skus", [])
+            if isinstance(sku, dict)
+        )
+    }
+
+
+def _storage_sku_available(storage_skus: list[dict[str, Any]], location: str) -> bool:
+    normalized_location = _normalized_location(location)
+    for sku in storage_skus:
+        if str(sku.get("name", "")).casefold() != "standard_lrs":
+            continue
+        if str(sku.get("kind", "")).casefold() not in {"storage", "storagev2"}:
+            continue
+        if normalized_location not in {
+            _normalized_location(item) for item in sku.get("locations", [])
+        }:
+            continue
+        restricted_locations = {
+            _normalized_location(value)
+            for restriction in sku.get("restrictions", [])
+            if str(restriction.get("type", "")).casefold() == "location"
+            for value in restriction.get("values", [])
+        }
+        if normalized_location not in restricted_locations:
+            return True
+    return False
+
+
+def _model_sku(
+    model_config: dict[str, Any], models: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    for entry in models:
+        model = entry.get("model", {})
+        if not isinstance(model, dict):
+            continue
+        expected = (
+            ("name", model_config["modelName"]),
+            ("format", model_config["format"]),
+        )
+        if any(str(model.get(key, "")).casefold() != value.casefold() for key, value in expected):
+            continue
+        for optional_key, config_key in (("version", "modelVersion"), ("publisher", "publisher")):
+            configured = str(model_config.get(config_key, "")).strip()
+            if configured and str(model.get(optional_key, "")).casefold() != configured.casefold():
+                break
+        else:
+            for sku in model.get("skus", []):
+                if str(sku.get("name", "")).casefold() == model_config["skuName"].casefold():
+                    return sku
+    return None
+
+
+def _region_stack_issues(
+    config: dict[str, Any],
+    cli: AzureCli,
+    location: str,
+    service_regions: dict[str, set[str]],
+    storage_skus: list[dict[str, Any]],
+    search_basic_regions: set[str],
+) -> list[str]:
+    normalized_location = _normalized_location(location)
+    issues = [
+        f"{label} is not available"
+        for label, locations in service_regions.items()
+        if normalized_location not in locations
+    ]
+    if not _storage_sku_available(storage_skus, location):
+        issues.append("StorageV2 Standard_LRS is not available for this subscription")
+    if normalized_location not in search_basic_regions:
+        issues.append("Azure AI Search Basic is not available")
+    if not config["deployment"].get("deployModels", True):
+        return issues
+    if any(issue.startswith("Microsoft Foundry") for issue in issues):
+        return issues
+
+    models = _json_items(
+        cli.run(
+            "cognitiveservices",
+            "model",
+            "list",
+            "--location",
+            location,
+            expect_json=True,
+        )
+    )
+    requirements: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for model_config in (config["models"]["primary"], config["models"]["documentAi"]):
+        sku = _model_sku(model_config, models)
+        label = f"{model_config['modelName']} ({model_config['skuName']})"
+        if sku is None:
+            issues.append(f"{label} is not available")
+            continue
+        capacity = sku.get("capacity", {})
+        requested = model_config["capacity"]
+        maximum = capacity.get("maximum") if isinstance(capacity, dict) else None
+        if isinstance(maximum, (int, float)) and requested > maximum:
+            issues.append(f"{label} supports at most {maximum:g}, requested {requested}")
+            continue
+        requirements.append((model_config, sku))
+    if issues:
+        return issues
+
+    usages = _json_items(
+        cli.run(
+            "cognitiveservices",
+            "usage",
+            "list",
+            "--location",
+            location,
+            expect_json=True,
+        )
+    )
+    usage_by_name = {
+        str(item.get("name", {}).get("value", "")).casefold(): item
+        for item in usages
+        if isinstance(item.get("name"), dict)
+    }
+    requested_by_usage: dict[str, int] = {}
+    display_name_by_usage: dict[str, str] = {}
+    for model_config, sku in requirements:
+        usage_name = str(sku.get("usageName", "")).strip()
+        label = f"{model_config['modelName']} ({model_config['skuName']})"
+        if not usage_name:
+            issues.append(f"{label} does not expose a quota meter")
+            continue
+        normalized_usage_name = usage_name.casefold()
+        requested_by_usage[normalized_usage_name] = (
+            requested_by_usage.get(normalized_usage_name, 0) + model_config["capacity"]
+        )
+        display_name_by_usage[normalized_usage_name] = usage_name
+    for usage_name, requested in requested_by_usage.items():
+        usage = usage_by_name.get(usage_name)
+        if usage is None:
+            issues.append(f"quota '{display_name_by_usage[usage_name]}' is not assigned")
+            continue
+        remaining = float(usage.get("limit", 0)) - float(usage.get("currentValue", 0))
+        if str(usage.get("status", "Included")).casefold() == "blocked" or remaining < requested:
+            issues.append(
+                f"quota '{display_name_by_usage[usage_name]}' has {remaining:g} available, "
+                f"requested {requested}"
+            )
+    return issues
+
+
+def check_deployment_region(config: dict[str, Any], cli: AzureCli) -> None:
+    if config["mode"] != "deploy":
+        return
+    location = config["location"]
+    print(f"Checking service, SKU, model, and quota availability in '{location}'...")
+    service_regions, provider_issues = _service_region_support(cli)
+    if provider_issues:
+        raise SetupError("Azure provider prerequisites failed: " + "; ".join(provider_issues) + ".")
+    storage_skus = _storage_skus(config, cli)
+    search_basic_regions = _search_basic_regions(cli)
+    issues = _region_stack_issues(
+        config, cli, location, service_regions, storage_skus, search_basic_regions
+    )
+    if not issues:
+        print(f"  [ok] Region '{location}' supports the requested lab stack")
+        return
+
+    print(f"  Region '{location}' is unsuitable: {'; '.join(issues)}")
+    locations = _json_items(
+        cli.run(
+            "account",
+            "list-locations",
+            "--query",
+            "[?metadata.regionType=='Physical']",
+            expect_json=True,
+            include_subscription=False,
+        )
+    )
+    recommendations: list[str] = []
+    for candidate in locations:
+        candidate_name = str(candidate.get("name", "")).strip()
+        if not candidate_name or candidate_name.casefold() == location.casefold():
+            continue
+        try:
+            candidate_issues = _region_stack_issues(
+                config,
+                cli,
+                candidate_name,
+                service_regions,
+                storage_skus,
+                search_basic_regions,
+            )
+        except SetupError:
+            continue
+        if not candidate_issues:
+            recommendations.append(candidate_name)
+            if len(recommendations) == REGION_RECOMMENDATION_LIMIT:
+                break
+    recommendation = (
+        " Suggested regions: " + ", ".join(recommendations) + "."
+        if recommendations
+        else " No alternative region with sufficient reported quota was found."
+    )
+    raise SetupError(
+        f"Region '{location}' cannot host the requested lab stack: "
+        f"{'; '.join(issues)}.{recommendation} Update 'location' in customer-resources.json."
+    )
 
 
 def deploy(config: dict[str, Any], cli: AzureCli, what_if: bool) -> None:
@@ -1189,6 +1476,9 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     check_parser = subparsers.add_parser("check", help="Validate configuration and optionally Azure resources")
     check_parser.add_argument("--azure", action="store_true", help="Also verify the configured Azure resources")
+    subparsers.add_parser(
+        "check-region", help="Check model availability and quota and suggest suitable regions"
+    )
     deploy_parser = subparsers.add_parser("deploy", help="Deploy a customer-owned lab stack")
     deploy_parser.add_argument("--what-if", action="store_true", help="Preview changes before deployment")
     subparsers.add_parser("connect", help="Configure RBAC and Foundry connections")
@@ -1214,7 +1504,10 @@ def main() -> int:
         if args.command == "check":
             check_resources(config, cli)
             check_readiness(config, cli)
+        elif args.command == "check-region":
+            check_deployment_region(config, cli)
         elif args.command == "deploy":
+            check_deployment_region(config, cli)
             deploy(config, cli, args.what_if)
         elif args.command == "connect":
             connect(config, cli)
@@ -1222,6 +1515,7 @@ def main() -> int:
             configure(config, cli)
         elif args.command == "all":
             if config["mode"] == "deploy":
+                check_deployment_region(config, cli)
                 print("[1/3] Deploying the Azure lab stack")
                 deploy(config, cli, args.what_if)
                 print("[2/3] Configuring access and Foundry connections")

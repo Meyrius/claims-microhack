@@ -72,9 +72,23 @@ manages participant access separately.
 Set `deployment.deployRoleAssignments` to `false` when the deployment identity can
 create resources but a separate administrator will run `setup_lab.py connect`.
 
-Before choosing a location, confirm that both configured model deployments and enough
-quota are available there. Availability is subscription- and model-specific; ARM
-validation reports an unavailable model, SKU, or capacity before setup writes `.env`.
+Before choosing a location, confirm that the configured services, SKUs, model deployments,
+and model quota are available there. Availability is subscription- and model-specific;
+ARM validation reports an unavailable resource, model, SKU, or capacity before setup
+writes `.env`. Run the subscription-aware preflight to check the configured region and
+receive up to three alternatives that support the complete lab stack:
+
+```bash
+python labautomation/setup_lab.py --config labautomation/customer-resources.json check-region
+```
+
+The `deploy` and `all` commands run this preflight automatically before creating resources.
+The preflight checks provider registration and regional support for Storage, Azure AI
+Search, and Microsoft Foundry; StorageV2 `Standard_LRS` subscription availability;
+the Search `Basic` offering; and both model SKUs and their remaining quota. Child
+resources inherit their parent scope.
+The subsequent ARM validation remains authoritative for Azure Policy, permissions, name
+availability, and service capacity changes after the check.
 
 The deploy template keeps Storage shared-key authentication disabled, uses Microsoft
 Entra ID for Blob operations, and enables the public Blob endpoint required by a local

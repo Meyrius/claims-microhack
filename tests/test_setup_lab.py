@@ -4,7 +4,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from labautomation import setup_lab
 
@@ -160,6 +160,28 @@ class AuthenticationModeTests(unittest.TestCase):
 
 
 class BootstrapSecurityTests(unittest.TestCase):
+    def test_azure_cli_uses_resolved_windows_launcher(self) -> None:
+        completed = subprocess.CompletedProcess(args=["az"], returncode=0, stdout="", stderr="")
+        launcher = r"C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.CMD"
+
+        with (
+            patch.object(setup_lab.shutil, "which", return_value=launcher),
+            patch("subprocess.run", return_value=completed) as run,
+        ):
+            setup_lab.AzureCli("subscription").run("account", "show")
+
+        self.assertEqual(launcher, run.call_args.args[0][0])
+
+    def test_azure_cli_can_omit_subscription_for_account_locations(self) -> None:
+        completed = subprocess.CompletedProcess(args=["az"], returncode=0, stdout="[]", stderr="")
+
+        with patch("subprocess.run", return_value=completed) as run:
+            setup_lab.AzureCli("subscription").run(
+                "account", "list-locations", expect_json=True, include_subscription=False
+            )
+
+        self.assertNotIn("--subscription", run.call_args.args[0])
+
     def test_long_azure_operation_reports_periodic_progress(self) -> None:
         completed = subprocess.CompletedProcess(args=["az"], returncode=0, stdout="", stderr="")
 
@@ -340,6 +362,234 @@ class BootstrapSecurityTests(unittest.TestCase):
         self.assertTrue(any(argument.startswith("@") for argument in calls[1]))
 
 
+class RegionCapacityTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.config = json.loads(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
+        self.config["subscriptionId"] = "11111111-1111-1111-1111-111111111111"
+        self.config["participantObjectId"] = "22222222-2222-2222-2222-222222222222"
+
+    def _models(self) -> list[dict[str, object]]:
+        return [
+            {
+                "model": {
+                    "name": "gpt-5.4",
+                    "format": "OpenAI",
+                    "skus": [
+                        {
+                            "name": "GlobalStandard",
+                            "usageName": "OpenAI.GlobalStandard.gpt-5.4",
+                            "capacity": {"maximum": 1000},
+                        }
+                    ],
+                }
+            },
+            {
+                "model": {
+                    "name": "mistral-document-ai-2512",
+                    "format": "Mistral AI",
+                    "version": "1",
+                    "publisher": "Mistral AI",
+                    "skus": [
+                        {
+                            "name": "GlobalStandard",
+                            "usageName": "Mistral.GlobalStandard.document-ai",
+                            "capacity": {"maximum": 100},
+                        }
+                    ],
+                }
+            },
+        ]
+
+    def _usages(self, primary_limit: int) -> list[dict[str, object]]:
+        return [
+            {
+                "name": {"value": "OpenAI.GlobalStandard.gpt-5.4"},
+                "currentValue": 0,
+                "limit": primary_limit,
+                "status": "Included",
+            },
+            {
+                "name": {"value": "Mistral.GlobalStandard.document-ai"},
+                "currentValue": 0,
+                "limit": 10,
+                "status": "Included",
+            },
+        ]
+
+    def _provider(self, resource_type: str) -> dict[str, object]:
+        return {
+            "registrationState": "Registered",
+            "resourceTypes": [
+                {
+                    "resourceType": resource_type,
+                    "locations": ["West Europe", "Sweden Central"],
+                }
+            ],
+        }
+
+    def _storage_skus(self, restricted: bool = False) -> list[dict[str, object]]:
+        return [
+            {
+                "name": "Standard_LRS",
+                "kind": "StorageV2",
+                "locations": ["westeurope", "swedencentral"],
+                "restrictions": (
+                    [
+                        {
+                            "type": "Location",
+                            "values": ["westeurope"],
+                            "reasonCode": "NotAvailableForSubscription",
+                        }
+                    ]
+                    if restricted
+                    else []
+                ),
+            }
+        ]
+
+    def _search_offerings(self) -> list[dict[str, object]]:
+        return [
+            {"regionName": region, "skus": [{"name": "basic"}]}
+            for region in ("West Europe", "Sweden Central")
+        ]
+
+    def test_configured_region_passes_when_models_and_quota_are_available(self) -> None:
+        models = self._models()
+        usages = self._usages(primary_limit=300)
+        providers = {
+            "Microsoft.Storage": self._provider("storageAccounts"),
+            "Microsoft.Search": self._provider("searchServices"),
+            "Microsoft.CognitiveServices": self._provider("accounts"),
+        }
+        storage_skus = self._storage_skus()
+        search_offerings = self._search_offerings()
+
+        class FakeCli:
+            def run(self, *arguments: str, **_: object) -> object:
+                if arguments[:2] == ("provider", "show"):
+                    return providers[arguments[arguments.index("--namespace") + 1]]
+                if arguments[:3] == ("rest", "--method", "get"):
+                    url = arguments[arguments.index("--url") + 1]
+                    return search_offerings if "Microsoft.Search/offerings" in url else storage_skus
+                return models if arguments[1:3] == ("model", "list") else usages
+
+        with patch("builtins.print"):
+            setup_lab.check_deployment_region(self.config, FakeCli())
+
+    def test_unsuitable_region_reports_a_suitable_alternative(self) -> None:
+        models = self._models()
+        insufficient_usages = self._usages(primary_limit=100)
+        sufficient_usages = self._usages(primary_limit=300)
+        providers = {
+            "Microsoft.Storage": self._provider("storageAccounts"),
+            "Microsoft.Search": self._provider("searchServices"),
+            "Microsoft.CognitiveServices": self._provider("accounts"),
+        }
+        storage_skus = self._storage_skus()
+        search_offerings = self._search_offerings()
+
+        class FakeCli:
+            def run(self, *arguments: str, **_: object) -> object:
+                if arguments[:2] == ("provider", "show"):
+                    return providers[arguments[arguments.index("--namespace") + 1]]
+                if arguments[:3] == ("rest", "--method", "get"):
+                    url = arguments[arguments.index("--url") + 1]
+                    return search_offerings if "Microsoft.Search/offerings" in url else storage_skus
+                if arguments[:2] == ("account", "list-locations"):
+                    return [{"name": "westeurope"}, {"name": "swedencentral"}]
+                location = arguments[arguments.index("--location") + 1]
+                if arguments[1:3] == ("model", "list"):
+                    return models
+                return sufficient_usages if location == "swedencentral" else insufficient_usages
+
+        with (
+            patch("builtins.print"),
+            self.assertRaisesRegex(setup_lab.SetupError, "Suggested regions: swedencentral"),
+        ):
+            setup_lab.check_deployment_region(self.config, FakeCli())
+
+    def test_subscription_restricted_storage_sku_is_rejected(self) -> None:
+        models = self._models()
+        usages = self._usages(primary_limit=300)
+        providers = {
+            "Microsoft.Storage": self._provider("storageAccounts"),
+            "Microsoft.Search": self._provider("searchServices"),
+            "Microsoft.CognitiveServices": self._provider("accounts"),
+        }
+        storage_skus = self._storage_skus(restricted=True)
+        search_offerings = self._search_offerings()
+
+        class FakeCli:
+            def run(self, *arguments: str, **_: object) -> object:
+                if arguments[:2] == ("provider", "show"):
+                    return providers[arguments[arguments.index("--namespace") + 1]]
+                if arguments[:3] == ("rest", "--method", "get"):
+                    url = arguments[arguments.index("--url") + 1]
+                    return search_offerings if "Microsoft.Search/offerings" in url else storage_skus
+                if arguments[:2] == ("account", "list-locations"):
+                    return [{"name": "westeurope"}, {"name": "swedencentral"}]
+                return models if arguments[1:3] == ("model", "list") else usages
+
+        with (
+            patch("builtins.print"),
+            self.assertRaisesRegex(setup_lab.SetupError, "StorageV2 Standard_LRS"),
+        ):
+            setup_lab.check_deployment_region(self.config, FakeCli())
+
+    def test_search_basic_must_be_offered_in_region(self) -> None:
+        self.config["deployment"]["deployModels"] = False
+        issues = setup_lab._region_stack_issues(
+            self.config,
+            Mock(),
+            "westeurope",
+            {
+                "Storage account": {"westeurope"},
+                "Azure AI Search": {"westeurope"},
+                "Microsoft Foundry": {"westeurope"},
+            },
+            self._storage_skus(),
+            set(),
+        )
+
+        self.assertIn("Azure AI Search Basic is not available", issues)
+
+    def test_foundry_must_be_available_in_region(self) -> None:
+        issues = setup_lab._region_stack_issues(
+            self.config,
+            Mock(),
+            "westeurope",
+            {
+                "Storage account": {"westeurope"},
+                "Azure AI Search": {"westeurope"},
+                "Microsoft Foundry": {"swedencentral"},
+            },
+            self._storage_skus(),
+            {"westeurope"},
+        )
+
+        self.assertIn("Microsoft Foundry is not available", issues)
+
+    def test_non_model_resources_are_checked_when_model_deployment_is_disabled(self) -> None:
+        self.config["deployment"]["deployModels"] = False
+        cli = Mock()
+
+        issues = setup_lab._region_stack_issues(
+            self.config,
+            cli,
+            "westeurope",
+            {
+                "Storage account": {"westeurope"},
+                "Azure AI Search": {"westeurope"},
+                "Microsoft Foundry": {"westeurope"},
+            },
+            [],
+            {"westeurope"},
+        )
+
+        self.assertIn("StorageV2 Standard_LRS is not available for this subscription", issues)
+        cli.run.assert_not_called()
+
+
 class OwnershipTests(unittest.TestCase):
     def setUp(self) -> None:
         self.config = json.loads(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
@@ -478,6 +728,54 @@ class CommandDispatchTests(unittest.TestCase):
         self.assertEqual(0, result)
         check_resources.assert_called_once_with(config, cli)
         check_readiness.assert_called_once_with(config, cli)
+
+    def test_deploy_checks_region_before_deployment(self) -> None:
+        config = json.loads(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
+
+        class FakeCli:
+            def ensure_session(self) -> None:
+                return None
+
+        cli = FakeCli()
+        with (
+            patch("sys.argv", ["setup_lab.py", "deploy", "--what-if"]),
+            patch.object(setup_lab, "load_config", return_value=config),
+            patch.object(setup_lab.shutil, "which", return_value="az"),
+            patch.object(setup_lab, "AzureCli", return_value=cli),
+            patch.object(setup_lab, "check_deployment_region") as check_region,
+            patch.object(setup_lab, "deploy") as deploy,
+            patch("builtins.print"),
+        ):
+            result = setup_lab.main()
+
+        self.assertEqual(0, result)
+        check_region.assert_called_once_with(config, cli)
+        deploy.assert_called_once_with(config, cli, True)
+
+    def test_all_checks_region_before_deployment(self) -> None:
+        config = json.loads(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
+
+        class FakeCli:
+            def ensure_session(self) -> None:
+                return None
+
+        cli = FakeCli()
+        with (
+            patch("sys.argv", ["setup_lab.py", "all"]),
+            patch.object(setup_lab, "load_config", return_value=config),
+            patch.object(setup_lab.shutil, "which", return_value="az"),
+            patch.object(setup_lab, "AzureCli", return_value=cli),
+            patch.object(setup_lab, "check_deployment_region") as check_region,
+            patch.object(setup_lab, "deploy") as deploy,
+            patch.object(setup_lab, "connect"),
+            patch.object(setup_lab, "configure"),
+            patch("builtins.print"),
+        ):
+            result = setup_lab.main()
+
+        self.assertEqual(0, result)
+        check_region.assert_called_once_with(config, cli)
+        deploy.assert_called_once_with(config, cli, False)
 
 
 class RoleAssignmentTests(unittest.TestCase):
