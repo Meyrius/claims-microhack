@@ -283,44 +283,53 @@ base.
 * **Blob upload is denied:** Rerun `connect`, confirm the participant has Storage Blob
 	Data Contributor, and verify the Storage network policy permits the Dev Container's
 	data-plane connection.
-* **Blob upload reports that Storage network rules may block the request:** Check the
-	account with `az storage account show --name <storage-name> --resource-group
-	<resource-group> --query publicNetworkAccess`. If it returns `Disabled`, and an
-	update immediately returns to `Disabled`, an inherited Azure Policy is modifying the
-	account. Ask the customer's Azure administrator to identify the effective policy
-	assignment and its definition reference that modifies `publicNetworkAccess`.
-	Ask the Azure administrator for a private endpoint reachable from the development
-	environment or an approved, time-limited exemption scoped to the Storage account.
-	An administrator with `Microsoft.Authorization/policyExemptions/write` can exempt
-	only that public-network rule from the customer's policy assignment:
+* **Blob upload reports that Storage network rules may block the request:** The lab
+	uses the public Storage endpoint with Microsoft Entra authentication; anonymous Blob
+	access remains disabled. Use the Azure portal to request a narrow, temporary policy
+	exemption:
 
-	```bash
-	az policy exemption create \
-	  --name claims-storage-public-network-lab \
-	  --display-name "Claims MicroHack Storage network access" \
-	  --description "Temporary exception for uploading MicroHack lab data" \
-	  --exemption-category Waiver \
-	  --expires-on "<ISO-8601-expiration>" \
-	  --scope "<storage-resource-id>" \
-	  --policy-assignment "<effective-policy-assignment-id>" \
-	  --policy-definition-reference-ids "<public-network-policy-reference-id>"
-	az storage account update --ids "<storage-resource-id>" \
-	  --public-network-access Enabled
-	python labautomation/setup_lab.py \
-	  --config labautomation/customer-resources.json configure
-	```
+	1. Open the affected **Storage account**, select **Networking**, and confirm that
+	   **Public network access** is disabled or restricted. Record the current setting so
+	   it can be restored later.
+	2. Identify the enforcing policy assignment. For a denied update, open the failed
+	   event under **Storage account** > **Activity log** and inspect its policy details.
+	   If the setting saves but remains restricted, ask the Azure administrator to review
+	   the policy assignments and policy events that apply to this Storage account for a
+	   **Modify** effect. A similarly named policy with only an **Audit** effect isn't
+	   sufficient if another assignment uses **Deny** or **Modify**.
+	3. Ask an Azure administrator to search the portal for **Policy**, open
+	   **Exemptions**, and select **Create exemption**. Creating an exemption requires
+	   permission to write policy exemptions at the Storage account and permission to
+	   exempt the target assignment; **Resource Policy Contributor** is one built-in role
+	   that includes policy-exemption management.
+	4. Select the assignment identified in the activity log and set the exemption scope
+	   to only this Storage account. Choose category **Waiver**, use
+	   `claims-storage-public-network-lab` as the name, add a short justification, and set
+	   an expiration shortly after the MicroHack. If the assignment is an initiative,
+	   select only the included definition that enforces the Storage network setting.
+	5. Create the exemption. Return to **Storage account** > **Networking** > **Manage**,
+	   select **Enable** and **Enabled from all networks**, and save. Do not enable
+	   anonymous Blob access. If the setting is changed back or the save is denied, check
+	   the activity log for another enforcing assignment and ask the administrator to
+	   update the exemption.
+	6. Rerun only the interrupted configuration phase:
 
-	Use literal IDs or define and verify shell variables in the same terminal; an empty
-	`--scope` produces an authorization error at `/providers/Microsoft.Authorization/
-	policyExemptions/...`. Do not make the setup create this governance exception
-	automatically. After the lab, disable public access before deleting the exemption:
+	   ```bash
+	   python labautomation/setup_lab.py \
+	     --config labautomation/customer-resources.json configure
+	   ```
 
-	```bash
-	az storage account update --ids "<storage-resource-id>" \
-	  --public-network-access Disabled
-	az policy exemption delete --name claims-storage-public-network-lab \
-	  --scope "<storage-resource-id>"
-	```
+	   This uploads the policy documents and writes `.env` in the repository root.
+	7. Keep the approved network path available until the MicroHack is finished because
+	   later challenges read Blob data through Azure AI Search. In `existing` mode,
+	   restore the recorded network setting and delete the exemption under **Policy** >
+	   **Exemptions**. In `deploy` mode, the normal resource-group cleanup removes the
+	   lab Storage account and its resource-scoped exemption. An expired exemption stops
+	   applying but remains listed until it is deleted.
+
+	If company policy doesn't permit an exemption, the Azure administrator must provide
+	a private endpoint that is reachable from the development environment. Do not
+	disable the complete policy assignment.
 * **A model deployment isn't found:** Correct its deployment name in the customer
 	configuration or deploy that model in the configured Foundry account.
 * **ARM reports unavailable model, SKU, capacity, or quota:** Select a region and
