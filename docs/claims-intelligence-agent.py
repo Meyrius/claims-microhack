@@ -197,7 +197,7 @@ the input. Do not call either knowledge-base tool in this mode. Your role is to:
         ).rstrip("/")
         if not search_endpoint:
             raise RuntimeError("FOUNDRY_IQ_SEARCH_ENDPOINT is not set. Complete Task 1 first.")
-        mcp_api_version = os.environ.get("FOUNDRY_IQ_MCP_API_VERSION", "2026-04-01")
+        mcp_api_version = os.environ.get("FOUNDRY_IQ_MCP_API_VERSION", "2026-08-01-preview")
 
         return MCPTool(
             server_label="policies-knowledge-base",
@@ -224,7 +224,7 @@ the input. Do not call either knowledge-base tool in this mode. Your role is to:
         ).rstrip("/")
         if not search_endpoint:
             raise RuntimeError("FOUNDRY_IQ_SEARCH_ENDPOINT is not set. Complete Task 1 first.")
-        mcp_api_version = os.environ.get("FOUNDRY_IQ_MCP_API_VERSION", "2026-04-01")
+        mcp_api_version = os.environ.get("FOUNDRY_IQ_MCP_API_VERSION", "2026-08-01-preview")
 
         return MCPTool(
             server_label="crash-statements-knowledge-base",

@@ -145,7 +145,7 @@
     },
     "mcpApiVersion": {
       "type": "string",
-      "defaultValue": "2026-04-01"
+      "defaultValue": "2026-08-01-preview"
     },
     "participantObjectId": {
       "type": "string",

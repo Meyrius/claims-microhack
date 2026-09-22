@@ -45,7 +45,7 @@ POLICIES_KNOWLEDGE_SOURCE_NAME = os.getenv(
 POLICIES_KNOWLEDGE_BASE_NAME = os.getenv(
     "FOUNDRY_IQ_POLICIES_KNOWLEDGE_BASE_NAME", "policies-kb"
 )
-MCP_API_VERSION = os.getenv("FOUNDRY_IQ_MCP_API_VERSION", "2026-04-01")
+MCP_API_VERSION = os.getenv("FOUNDRY_IQ_MCP_API_VERSION", "2026-08-01-preview")
 
 
 def _client_and_endpoint() -> tuple[SearchIndexClient, str]:

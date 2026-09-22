@@ -54,7 +54,7 @@
     "knowledgeSourceName": "crash-statements-ks",
     "knowledgeBaseName": "crash-statements-kb",
     "apiVersion": "2023-11-01",
-    "mcpApiVersion": "2026-04-01"
+    "mcpApiVersion": "2026-08-01-preview"
   },
   "policies": {
     "containerName": "policies",
