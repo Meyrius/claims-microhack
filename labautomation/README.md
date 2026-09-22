@@ -90,6 +90,26 @@ resources inherit their parent scope.
 The subsequent ARM validation remains authoritative for Azure Policy, permissions, name
 availability, and service capacity changes after the check.
 
+### Use an organizer-hosted Document AI deployment
+
+Subscriptions that cannot purchase the Mistral partner offer can use a deployment hosted
+by the hackathon organizer. Set `deployment.deployDocumentAi` to `false`; the setup then
+deploys and validates the primary model but skips the Mistral deployment and its quota
+check. After setup writes `.env`, replace these values with the endpoint and deployment
+details supplied by the organizer:
+
+```dotenv
+MISTRAL_DOCUMENT_AI_ENDPOINT=https://<organizer-account>.services.ai.azure.com
+MISTRAL_DOCUMENT_AI_KEY=<shared-through-a-secret-channel>
+MISTRAL_DOCUMENT_AI_DEPLOYMENT_NAME=mistral-document-ai-2512
+MISTRAL_DOCUMENT_AI_API_VERSION=2024-05-01-preview
+```
+
+Do not store the key in `customer-resources.json` or commit `.env`. The organizer should
+use a dedicated Foundry account for the event, monitor its quota and cost, and rotate the
+key after the event. Running `setup_lab.py all` again rewrites `.env`, so reapply the
+organizer values afterward.
+
 The deploy template keeps Storage shared-key authentication disabled, uses Microsoft
 Entra ID for Blob operations, and enables the public Blob endpoint required by a local
 Dev Container. Customer Azure Policies can deny the deployment or modify these
@@ -100,8 +120,9 @@ and use an approved exception or private-connectivity design when required.
 
 Change `mode` to `existing`, set every resource name and its actual resource group,
 and set `deployment.deployModels` to `false`. The Foundry project must belong to the
-configured Foundry account, and both configured model deployment names must already
-exist in that account.
+configured Foundry account. The primary deployment and, unless
+`deployment.deployDocumentAi` is `false`, the Document AI deployment must already exist
+in that account.
 
 The initial implementation supports resources in one tenant and subscription. It does
 not connect resources across tenants or subscriptions.

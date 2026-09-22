@@ -181,9 +181,25 @@ Choose one mode:
 	different resource groups but must be in the configured tenant and subscription.
 	Both configured model deployments must already exist.
 
-Before selecting a region for `deploy`, verify that the required services, SKUs, both
+Before selecting a region for `deploy`, verify that the required services, SKUs, enabled
 models, and enough quota are available for your subscription. Availability is not the
 same in every region.
+
+#### Free-credit subscriptions and shared Mistral
+
+If the subscription cannot purchase the Mistral partner offer, use the organizer-hosted
+deployment instead of stopping the lab:
+
+1. Set `deployment.deployDocumentAi` to `false` in
+	`labautomation/customer-resources.json`.
+2. Complete the setup normally. The primary model and all non-Mistral resources are
+	still deployed.
+3. Replace the generated `MISTRAL_DOCUMENT_AI_*` values in `.env` with the endpoint,
+	key, deployment name, and API version supplied by the organizer.
+
+Receive the key through the event's secret-sharing channel. Never add it to the JSON
+configuration or Git. If setup is run again, it rewrites `.env`; restore the shared
+Mistral values before continuing with Challenge 2.
 
 Validate the configuration locally without changing Azure:
 
@@ -198,7 +214,7 @@ python labautomation/setup_lab.py --config labautomation/customer-resources.json
 ```
 
 It checks regional support for Storage, Azure AI Search `Basic`, Microsoft Foundry,
-both configured model SKUs, and the required model quota. If the selected region is
+the enabled model SKUs, and the required model quota. If the selected region is
 unsuitable, it reports the reasons and suggests up to three regions that support the
 complete lab stack. The `deploy` and `all` commands repeat this check automatically.
 

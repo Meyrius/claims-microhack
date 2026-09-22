@@ -49,6 +49,13 @@
         "description": "Whether to create AI model deployments inside the AI Foundry account."
       }
     },
+    "deployDocumentAiDeployment": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Whether to create the partner Document AI model deployment."
+      }
+    },
     "deployRoleAssignments": {
       "type": "bool",
       "defaultValue": true,
@@ -287,7 +294,7 @@
     {
       "type": "Microsoft.CognitiveServices/accounts/deployments",
       "apiVersion": "2025-07-01-preview",
-      "condition": "[parameters('deployModelDeployments')]",
+      "condition": "[and(parameters('deployModelDeployments'), parameters('deployDocumentAiDeployment'))]",
       "name": "[format('{0}/{1}', parameters('foundryAccountName'), parameters('documentAiDeploymentName'))]",
       "sku": {
         "name": "[parameters('documentAiSkuName')]",

@@ -93,6 +93,21 @@ class SetupConfigTests(unittest.TestCase):
 
         self.assertEqual(False, parameters["deployRoleAssignments"]["value"])
 
+    def test_document_ai_deployment_setting_is_passed_to_arm(self) -> None:
+        self.config["deployment"]["deployDocumentAi"] = False
+
+        parameters = setup_lab.deployment_parameters(self.config)
+
+        self.assertEqual(False, parameters["deployDocumentAiDeployment"]["value"])
+
+    def test_document_ai_deployment_defaults_to_enabled(self) -> None:
+        del self.config["deployment"]["deployDocumentAi"]
+
+        setup_lab.validate_config(self.config)
+        parameters = setup_lab.deployment_parameters(self.config)
+
+        self.assertEqual(True, parameters["deployDocumentAiDeployment"]["value"])
+
     def test_foundry_child_writes_are_serialized(self) -> None:
         template = json.loads(setup_lab.TEMPLATE_FILE.read_text(encoding="utf-8"))
         resources = {resource["type"] + ":" + resource["name"]: resource for resource in template["resources"]}
@@ -501,6 +516,30 @@ class RegionCapacityTests(unittest.TestCase):
 
         with patch("builtins.print"):
             setup_lab.check_deployment_region(self.config, FakeCli())
+
+    def test_disabled_document_ai_is_omitted_from_region_preflight(self) -> None:
+        self.config["deployment"]["deployDocumentAi"] = False
+        models = self._models()[:1]
+        usages = self._usages(primary_limit=300)[:1]
+
+        class FakeCli:
+            def run(self, *arguments: str, **_: object) -> object:
+                return models if arguments[1:3] == ("model", "list") else usages
+
+        issues = setup_lab._region_stack_issues(
+            self.config,
+            FakeCli(),
+            "westeurope",
+            {
+                "Storage account": {"westeurope"},
+                "Azure AI Search": {"westeurope"},
+                "Microsoft Foundry": {"westeurope"},
+            },
+            self._storage_skus(),
+            {"westeurope"},
+        )
+
+        self.assertEqual([], issues)
 
     def test_unsuitable_region_reports_a_suitable_alternative(self) -> None:
         models = self._models()

@@ -10,6 +10,7 @@
     "resourceGroup": "rg-claims-microhack",
     "createResourceGroup": true,
     "deployModels": true,
+    "deployDocumentAi": true,
     "deployRoleAssignments": true
   },
   "resources": {
