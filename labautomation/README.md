@@ -90,6 +90,11 @@ resources inherit their parent scope.
 The subsequent ARM validation remains authoritative for Azure Policy, permissions, name
 availability, and service capacity changes after the check.
 
+Set `deployment.deployPrimaryModel` to `false` to skip deployment, quota checks,
+and local validation for the primary GPT model independently of Document AI. The
+default is `true`. The configured primary deployment must still be reachable by the
+Foundry agents when the challenges run.
+
 ### Use an organizer-hosted Document AI deployment
 
 Subscriptions that cannot purchase the Mistral partner offer can use a deployment hosted

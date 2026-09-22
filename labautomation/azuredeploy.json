@@ -49,6 +49,13 @@
         "description": "Whether to create AI model deployments inside the AI Foundry account."
       }
     },
+    "deployPrimaryModelDeployment": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Whether to create the primary GPT model deployment."
+      }
+    },
     "deployDocumentAiDeployment": {
       "type": "bool",
       "defaultValue": true,
@@ -275,7 +282,7 @@
     {
       "type": "Microsoft.CognitiveServices/accounts/deployments",
       "apiVersion": "2024-10-01",
-      "condition": "[parameters('deployModelDeployments')]",
+      "condition": "[and(parameters('deployModelDeployments'), parameters('deployPrimaryModelDeployment'))]",
       "name": "[format('{0}/{1}', parameters('foundryAccountName'), parameters('primaryModelDeploymentName'))]",
       "sku": {
         "capacity": "[parameters('primaryModelCapacity')]",

@@ -232,10 +232,11 @@ def validate_config(config: dict[str, Any]) -> None:
     for field_name in ("createResourceGroup", "deployModels", "deployRoleAssignments"):
         if not isinstance(deployment.get(field_name), bool):
             raise SetupError(f"Configuration value 'deployment.{field_name}' must be true or false.")
-    if "deployDocumentAi" in deployment and not isinstance(deployment["deployDocumentAi"], bool):
-        raise SetupError(
-            "Configuration value 'deployment.deployDocumentAi' must be true or false."
-        )
+    for field_name in ("deployPrimaryModel", "deployDocumentAi"):
+        if field_name in deployment and not isinstance(deployment[field_name], bool):
+            raise SetupError(
+                f"Configuration value 'deployment.{field_name}' must be true or false."
+            )
 
     resources = _section(config, "resources")
     for resource_name in ("foundryAccount", "searchService", "storageAccount"):
@@ -312,6 +313,9 @@ def deployment_parameters(config: dict[str, Any]) -> dict[str, Any]:
     return {
         "location": {"value": config["location"]},
         "deployModelDeployments": {"value": bool(config["deployment"].get("deployModels", True))},
+        "deployPrimaryModelDeployment": {
+            "value": bool(config["deployment"].get("deployPrimaryModel", True))
+        },
         "deployDocumentAiDeployment": {
             "value": bool(config["deployment"].get("deployDocumentAi", True))
         },
@@ -552,6 +556,14 @@ def _region_stack_issues(
     if any(issue.startswith("Microsoft Foundry") for issue in issues):
         return issues
 
+    model_configs = []
+    if config["deployment"].get("deployPrimaryModel", True):
+        model_configs.append(config["models"]["primary"])
+    if config["deployment"].get("deployDocumentAi", True):
+        model_configs.append(config["models"]["documentAi"])
+    if not model_configs:
+        return issues
+
     models = _json_items(
         cli.run(
             "cognitiveservices",
@@ -563,9 +575,6 @@ def _region_stack_issues(
         )
     )
     requirements: list[tuple[dict[str, Any], dict[str, Any]]] = []
-    model_configs = [config["models"]["primary"]]
-    if config["deployment"].get("deployDocumentAi", True):
-        model_configs.append(config["models"]["documentAi"])
     for model_config in model_configs:
         sku = _model_sku(model_config, models)
         label = f"{model_config['modelName']} ({model_config['skuName']})"
@@ -1036,7 +1045,9 @@ def check_resources(config: dict[str, Any], cli: AzureCli) -> None:
     if storage_properties.get("allowSharedKeyAccess") is False:
         print("  [ok] Storage account uses Microsoft Entra authentication")
 
-    models = [config["models"]["primary"]]
+    models = []
+    if config["deployment"].get("deployPrimaryModel", True):
+        models.append(config["models"]["primary"])
     if config["deployment"].get("deployDocumentAi", True):
         models.append(config["models"]["documentAi"])
     for model in models:
